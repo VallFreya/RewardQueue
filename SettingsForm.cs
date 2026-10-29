@@ -21,6 +21,8 @@ namespace RewardQueue
         // Эти элементы пересоздаются при смене темы и масштаба (см. BuildUi)
         private ToolTip _tip = null!;
         private Panel _content = null!;
+        private Panel _bottomBar = null!;
+        private Label _bottomLabel = null!;
         private readonly List<Card> _cards = new List<Card>();
         private Label _serverLabel = null!;
         private Label _clientsLabel = null!;
@@ -154,9 +156,28 @@ namespace RewardQueue
             _ordersLabel = AddText(status, "", 6);
             _queueLabel = AddText(status, "", 6);
 
+            // Нижняя полоса видна всегда, как бы ни была прокручена страница: кнопки «Сохранить» нет, всё сохраняется само
+            _bottomBar = new Panel { Dock = DockStyle.Bottom, Height = Ui.Px(36), BackColor = ObsTheme.BaseBg };
+            var bottomBar = _bottomBar;
+            _bottomLabel = new Label
+            {
+                Text = Loc.AutoSaveHint,
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                UseMnemonic = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(Ui.Px(CardPad), 0, Ui.Px(CardPad), 0),
+                ForeColor = ObsTheme.TextMuted,
+                BackColor = ObsTheme.BaseBg
+            };
+            bottomBar.Controls.Add(_bottomLabel);
+
+            FitBottomBar();
+
             // Fill добавляется первым: при docking контролы раскладываются от последнего добавленного к первому
             Controls.Add(content);
             Controls.Add(topBar);
+            Controls.Add(bottomBar);
 
             UpdateLive();
             LayoutContent();
@@ -271,6 +292,25 @@ namespace RewardQueue
             }
             _content.AutoScrollMinSize = new Size(0, y + Ui.Px(CardPad));
             _content.ResumeLayout(false);
+        }
+
+        // Высоту полосы подгоняем после раскладки окна, а не внутри неё: изменение высоты во время прохода раскладки
+        // не доходит до остальных элементов, и прокручиваемая область остаётся под полосой
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (_bottomLabel != null) FitBottomBar();
+        }
+
+        // Нижняя полоса выше, если подпись в узком окне переносится на вторую строку
+        private void FitBottomBar()
+        {
+            const TextFormatFlags flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+            // с запасом: Label переносит текст чуть раньше, чем его измеряет TextRenderer без внутренних отступов
+            int textWidth = Math.Max(1, ClientSize.Width - Ui.Px(CardPad * 2) - Ui.Px(14));
+            int textHeight = TextRenderer.MeasureText(_bottomLabel.Text, _bottomLabel.Font, new Size(textWidth, int.MaxValue), flags).Height;
+            int height = Math.Max(Ui.Px(36), textHeight + Ui.Px(16));
+            if (_bottomBar.Height != height) _bottomBar.Height = height;
         }
 
         // Подпись с переносом по словам: высота измеряется по ширине карточки

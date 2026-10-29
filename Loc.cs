@@ -51,6 +51,10 @@ namespace RewardQueue
         public static string ThemeDarkName => Ru ? "Тёмная" : "Dark";
         public static string ThemeLightName => Ru ? "Светлая" : "Light";
 
+        public static string AutoSaveHint => Ru
+            ? "Настройки сохраняются сразу, как только вы что-то меняете. Кнопки «Сохранить» нет."
+            : "Settings are saved as soon as you change anything. There is no Save button.";
+
         // Блок «Вход в Twitch»
         public static string TwitchTitle => Ru ? "Вход в Twitch" : "Twitch login";
         public static string AuthSignedOut => Ru

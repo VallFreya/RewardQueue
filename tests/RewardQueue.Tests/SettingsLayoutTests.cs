@@ -98,6 +98,18 @@ namespace RewardQueue.Tests
                         form.PerformLayout();
                         Application.DoEvents();
 
+                        // подпись про автосохранение закреплена внизу окна и видна при любой прокрутке
+                        var bottom = form.Controls.OfType<Panel>().Single(c => c.Dock == DockStyle.Bottom);
+                        Assert.Equal(form.ClientSize.Height, bottom.Bottom);
+                        Assert.Equal(Loc.AutoSaveHint, bottom.Controls.OfType<Label>().Single().Text);
+                        // прокручиваемая область кончается там, где начинается полоса, и подпись помещается целиком
+                        var scroll = form.Controls.OfType<Panel>().Single(c => c.Dock == DockStyle.Fill);
+                        Assert.Equal(bottom.Top, scroll.Bottom);
+                        var hint = bottom.Controls.OfType<Label>().Single();
+                        int needed = TextRenderer.MeasureText(hint.Text, hint.Font, new Size(hint.Width - hint.Padding.Horizontal, int.MaxValue),
+                            TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Height;
+                        Assert.True(bottom.Height >= needed, $"подпись внизу обрезана: {w}x{h} ru={russian} полоса {bottom.Height}, нужно {needed}");
+
                         var cards = Cards(form).ToList();
                         Assert.Equal(4, cards.Count);
                         foreach (var card in cards)
