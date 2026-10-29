@@ -25,8 +25,11 @@
     color-scheme: light;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 12px; font: 14px/1.45 "Segoe UI", sans-serif; background: var(--window); color: var(--text); }
-  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; }
+  /* Док занимает всю высоту: сверху шапка, в середине очередь (прокручивается), снизу закреплена форма ручного добавления */
+  html, body { height: 100%; }
+  body { margin: 0; display: flex; flex-direction: column; font: 14px/1.45 "Segoe UI", sans-serif; background: var(--window); color: var(--text); }
+  header { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 12px 10px; }
+  main { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
   h1 { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px; }
   .count { font-size: 12px; font-weight: 600; padding: 1px 9px; border-radius: 999px; background: var(--button); color: var(--text); }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
@@ -65,9 +68,16 @@
   .group { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .dot-r { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
 
-  details { margin-top: 12px; background: var(--base); border: 1px solid var(--border); border-radius: 4px; }
-  summary { cursor: pointer; padding: 9px 12px; font-weight: 600; }
+  /* внутри группы видно минимум три записи; если их больше, группа прокручивается, а не растягивается (высоту ставит скрипт) */
+  .gbody { overflow-y: auto; overscroll-behavior: contain; }
+  .gbody.scroll { padding-right: 4px; }
+
+  /* закреплённая внизу полоса: свёрнута до одной строки, раскрытая закрывает часть очереди */
+  #addBar { flex: none; background: var(--base); border-top: 1px solid var(--border); max-height: 75%; overflow-y: auto; }
+  #addToggle { display: flex; align-items: center; justify-content: space-between; width: 100%; background: transparent; border: 0; border-radius: 0; padding: 10px 12px; font-weight: 600; text-align: left; }
+  #addToggle:hover { background: var(--button-hover); }
   form { padding: 0 12px 12px; display: grid; gap: 8px; }
+  form[hidden] { display: none; }
   form label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 2px; }
   .primary { background: var(--primary); border-color: var(--primary); }
   .primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
@@ -95,14 +105,16 @@
   </label>
 </header>
 
-<div id="offline" class="banner" hidden>Нет связи с плагином. Страница переподключится сама.</div>
-<div id="empty" class="empty">Очередь пуста</div>
-<div id="current"></div>
-<div id="list"></div>
+<main id="content">
+  <div id="offline" class="banner" hidden>Нет связи с плагином. Страница переподключится сама.</div>
+  <div id="empty" class="empty">Очередь пуста</div>
+  <div id="current"></div>
+  <div id="list"></div>
+</main>
 
-<details id="add">
-  <summary>Добавить вручную</summary>
-  <form id="addForm" autocomplete="off">
+<section id="addBar">
+  <button id="addToggle" type="button" aria-expanded="false" aria-controls="addForm"><span>Добавить вручную</span><span id="chev" aria-hidden="true">▸</span></button>
+  <form id="addForm" autocomplete="off" hidden>
     <div>
       <label for="reward">Награда</label>
       <select id="reward" class="field"></select>
@@ -122,7 +134,7 @@
     <div><button id="addButton" class="primary" type="submit">Добавить в очередь</button></div>
     <div id="addNote" class="note"></div>
   </form>
-</details>
+</section>
 
 <script>
   const key = new URLSearchParams(location.search).get("key") || "";
@@ -226,6 +238,10 @@
   function renderEntries(entries) {
     const current = $("current");
     const list = $("list");
+
+    // прокрутка страницы и групп сохраняется: состояние приходит на каждое изменение очереди
+    const pageScroll = $("content").scrollTop;
+    const groupScroll = new Map([...document.querySelectorAll(".gbody")].map((b) => [b.dataset.group, b.scrollTop]));
     current.textContent = "";
     list.textContent = "";
 
@@ -245,12 +261,39 @@
       dot.style.setProperty("--c", colorFor(title));
       header.append(dot, document.createTextNode(title + " · " + items.length));
       list.append(header);
-      items.forEach(({ entry, number }) => list.append(entryCard(entry, number, false)));
+
+      const body = el("div", "gbody");
+      body.dataset.group = title;
+      items.forEach(({ entry, number }) => body.append(entryCard(entry, number, false)));
+      list.append(body);
     });
 
     $("empty").hidden = entries.length > 0;
     $("count").textContent = String(entries.length);
+    limitGroups();
+
+    $("content").scrollTop = pageScroll;
+    document.querySelectorAll(".gbody").forEach((b) => { b.scrollTop = groupScroll.get(b.dataset.group) || 0; });
   }
+
+  // В группе всегда видны минимум три записи; если их больше, высота группы равна высоте первых трёх, остальные
+  // доступны прокруткой внутри группы. Так одна длинная очередь не вытесняет остальные группы за край дока
+  const VISIBLE_ENTRIES = 3;
+  function limitGroups() {
+    document.querySelectorAll(".gbody").forEach((body) => {
+      body.style.maxHeight = "";
+      body.classList.remove("scroll");
+      const cards = body.children;
+      if (cards.length <= VISIBLE_ENTRIES) return;
+      const third = cards[VISIBLE_ENTRIES - 1];
+      // нижний край третьей записи вместе с отступом под ней
+      const height = third.getBoundingClientRect().bottom - body.getBoundingClientRect().top + parseFloat(getComputedStyle(third).marginBottom || "0");
+      body.style.maxHeight = Math.ceil(height) + "px";
+      body.classList.add("scroll");
+    });
+  }
+  window.addEventListener("resize", limitGroups);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(limitGroups);
 
   // ---- ручное добавление ----
   let rewardsKey = null;
@@ -279,6 +322,15 @@
     $("customRow").hidden = $("reward").value !== OTHER;
   }
   $("reward").onchange = updateCustomRow;
+
+  // Форма закреплена внизу и по умолчанию свёрнута (одна строка с названием и значком раскрытия)
+  $("addToggle").onclick = () => {
+    const open = $("addForm").hidden;
+    $("addForm").hidden = !open;
+    $("addToggle").setAttribute("aria-expanded", String(open));
+    $("chev").textContent = open ? "\u25BE" : "\u25B8";
+    if (open) $("addBar").scrollTop = 0;
+  };
 
   $("addForm").onsubmit = async (event) => {
     event.preventDefault();
