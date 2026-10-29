@@ -149,9 +149,14 @@ namespace RewardQueue
         }
     }
 
+    /// <summary>Оттенок карточки: обычный, зелёный (всё хорошо) или бледно-красный (есть проблема)</summary>
+    internal enum CardTone { Normal, Success, Danger }
+
     /// <summary>Карточка как QGroupBox в OBS: фон bg_base, скругление 4 px, жирный заголовок</summary>
     internal class CardPanel : Control
     {
+        private CardTone _tone;
+
         public CardPanel()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
@@ -160,6 +165,41 @@ namespace RewardQueue
             Font = Ui.Font();
         }
 
+        /// <summary>
+        /// Оттенок карточки. BackColor меняется вместе с ним: кнопки и подписи внутри берут фон у карточки,
+        /// подписям (Label) цвет фона переносится здесь же
+        /// </summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public CardTone Tone
+        {
+            get => _tone;
+            set
+            {
+                if (_tone == value) return;
+                _tone = value;
+                BackColor = FillColor;
+                foreach (Control child in Controls)
+                {
+                    if (child is Label) child.BackColor = FillColor;
+                }
+                Invalidate(true);
+            }
+        }
+
+        public Color FillColor => _tone switch
+        {
+            CardTone.Success => ObsTheme.SuccessBg,
+            CardTone.Danger => ObsTheme.DangerBg,
+            _ => ObsTheme.BaseBg
+        };
+
+        private Color BorderTint => _tone switch
+        {
+            CardTone.Success => ObsTheme.SuccessBorder,
+            CardTone.Danger => ObsTheme.DangerBorder,
+            _ => ObsTheme.CardBorder
+        };
+
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
@@ -167,8 +207,8 @@ namespace RewardQueue
             g.Clear(Parent?.BackColor ?? ObsTheme.WindowBg);
 
             using (var path = Ui.RoundedRect(new RectangleF(0.5f, 0.5f, Width - 1, Height - 1), Ui.Px(4)))
-            using (var brush = new SolidBrush(ObsTheme.BaseBg))
-            using (var pen = new Pen(ObsTheme.CardBorder, 1f))
+            using (var brush = new SolidBrush(FillColor))
+            using (var pen = new Pen(BorderTint, 1f))
             {
                 g.FillPath(brush, path);
                 g.DrawPath(pen, path);

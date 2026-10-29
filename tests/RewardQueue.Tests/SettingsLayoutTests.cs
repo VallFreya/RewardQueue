@@ -143,6 +143,56 @@ namespace RewardQueue.Tests
             });
         }
 
+        // Карточка входа: зелёная, пока всё хорошо, бледно-красная при проблеме, обычная в остальных случаях
+        [Theory]
+        [InlineData("signed-out", "Normal")]
+        [InlineData("waiting", "Normal")]
+        [InlineData("signed-in", "Success")]
+        [InlineData("problem-signed-out", "Danger")]
+        [InlineData("problem-signed-in", "Danger")]
+        public void TwitchCard_ColorFollowsTheLoginState(string authState, string expectedTone)
+        {
+            var expected = Enum.Parse<CardTone>(expectedTone);
+            foreach (bool dark in new[] { true, false })
+            {
+                RunSta(() =>
+                {
+                    var previousAuth = TwitchAuth.Current;
+                    using var auth = new TwitchAuth(Path.Combine(_fx.Dir, "tone_auth.bin"));
+                    try
+                    {
+                        Plugin.SetTheme(dark);
+                        auth.SetSnapshotForPreview(Snapshot(authState));
+                        TwitchAuth.Current = auth;
+
+                        using var form = new SettingsForm();
+                        _ = form.Handle;
+                        form.Show();
+
+                        var card = Cards(form).OrderBy(c => c.Top).First();
+                        Assert.Equal(expected, card.Tone);
+                        Color fill = expected switch
+                        {
+                            CardTone.Success => ObsTheme.SuccessBg,
+                            CardTone.Danger => ObsTheme.DangerBg,
+                            _ => ObsTheme.BaseBg
+                        };
+                        Assert.Equal(fill, card.BackColor);
+                        // подписи внутри карточки на том же фоне, иначе они проступали бы прямоугольниками
+                        foreach (var label in card.Controls.OfType<Label>()) Assert.Equal(fill, label.BackColor);
+
+                        // другие карточки оттенок не меняют
+                        Assert.All(Cards(form).OrderBy(c => c.Top).Skip(1), c => Assert.Equal(CardTone.Normal, c.Tone));
+                    }
+                    finally
+                    {
+                        TwitchAuth.Current = previousAuth;
+                        Plugin.SetTheme(true);
+                    }
+                });
+            }
+        }
+
         [Theory]
         [InlineData("https://www.twitch.tv/activate?device-code=ABCD", true)]
         [InlineData("https://twitch.tv/activate", true)]

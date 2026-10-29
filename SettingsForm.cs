@@ -47,6 +47,7 @@ namespace RewardQueue
         private volatile bool _rebuildRequested;
         private volatile string _fetchMessage = "";
         private Label _authStatus = null!;
+        private CardPanel _twitchCard = null!;
         private Label _authCode = null!;
         private ThemedButton _authOpen = null!;
         private ThemedButton _authCopy = null!;
@@ -143,6 +144,7 @@ namespace RewardQueue
             _authShown = "";
             _hidden.Clear();
             var twitch = AddCard(Loc.TwitchTitle);
+            _twitchCard = twitch.Panel;
             _authStatus = AddText(twitch, "", 0);
             _authCode = AddText(twitch, "", 10, bold: true, scale: 1.8f);
             AddAuthButtons(twitch, 12);
@@ -701,6 +703,11 @@ namespace RewardQueue
                     if (snapshot.Problem != AuthProblem.None) color = ObsTheme.DangerAccent;
                     break;
             }
+
+            // Карточка зелёная, пока вход действует без замечаний, и бледно-красная, если что-то не так
+            _twitchCard.Tone = snapshot.Problem != AuthProblem.None ? CardTone.Danger
+                : snapshot.State == AuthState.SignedIn ? CardTone.Success
+                : CardTone.Normal;
 
             bool waiting = snapshot.State == AuthState.WaitingForUser;
             _authStatus.Text = status;
