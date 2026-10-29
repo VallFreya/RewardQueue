@@ -1,0 +1,13 @@
+# Visual Studio и результаты сборки
+.vs/
+*.user
+*.suo
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+
+# Результаты тестов
+[Tt]est[Rr]esult*/
+*.log
