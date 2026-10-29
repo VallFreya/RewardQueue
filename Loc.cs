@@ -15,10 +15,14 @@ namespace RewardQueue
         private static bool _initialized;
         private static bool _ru;
 
+        /// <summary>Язык вместо выбранного в OBS (для проверок вне OBS): true русский, false английский</summary>
+        internal static bool? LanguageOverride { get; set; }
+
         private static bool Ru
         {
             get
             {
+                if (LanguageOverride.HasValue) return LanguageOverride.Value;
                 if (!_initialized)
                 {
                     try

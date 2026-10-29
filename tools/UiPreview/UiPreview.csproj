@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Показывает окно настроек без OBS и делает снимки экрана в разных размерах и темах (см. docs/development.md) -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>UiPreview</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Исходники плагина компилируются как есть -->
+  <ItemGroup>
+    <Compile Include="..\..\*.cs" LinkBase="plugin" />
+    <EmbeddedResource Include="..\..\web\*.html" LogicalName="web/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

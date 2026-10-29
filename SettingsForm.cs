@@ -6,18 +6,27 @@ namespace RewardQueue
     /// <summary>
     /// Окно настроек. Пока в нём адреса страниц с пояснением, как вставить их в OBS, и состояние сервера.
     /// Внешний вид повторяет тему OBS (см. ObsTheme); тема выбирается справа сверху и запоминается в config.json.
+    /// Раскладка считается кодом (LayoutContent): ширина карточек берётся от окна, высота каждого текста измеряется
+    /// с учётом переноса, поэтому окно можно растягивать и сужать.
     /// </summary>
     internal sealed class SettingsForm : Form
     {
         private const int CardPad = 16;
+        private const int CardGap = 12;
+        // Окно не уже этого размера (логические пиксели): дальше строки адресов становятся бесполезно короткими
+        private const int MinClientWidth = 520;
+        private const int MinClientHeight = 360;
 
         private readonly System.Windows.Forms.Timer _liveTimer;
-        // Эти элементы пересоздаются при смене темы (см. BuildUi)
+        // Эти элементы пересоздаются при смене темы и масштаба (см. BuildUi)
         private ToolTip _tip = null!;
+        private Panel _content = null!;
+        private readonly List<Card> _cards = new List<Card>();
         private Label _serverLabel = null!;
         private Label _clientsLabel = null!;
         private Label _probeLabel = null!;
         private ThemedButton _probeButton = null!;
+        private float _builtScale;
 
         public SettingsForm()
         {
@@ -31,7 +40,7 @@ namespace RewardQueue
 
             var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1366, 768);
             ClientSize = new Size(Math.Min(Ui.Px(820), area.Width - Ui.Px(40)), Math.Min(Ui.Px(660), area.Height - Ui.Px(100)));
-            MinimumSize = SizeFromClientSize(new Size(Ui.Px(600), Ui.Px(420)));
+            MinimumSize = SizeFromClientSize(new Size(Ui.Px(MinClientWidth), Ui.Px(MinClientHeight)));
 
             // состояние меняется редко, полсекунды хватает
             _liveTimer = new System.Windows.Forms.Timer { Interval = 500 };
@@ -42,9 +51,12 @@ namespace RewardQueue
             _liveTimer.Start();
         }
 
-        // Строит весь интерфейс по текущей теме. Вызывается при открытии окна и при смене темы
+        // Строит весь интерфейс по текущей теме и масштабу. Вызывается при открытии окна, смене темы и смене масштаба
         private void BuildUi()
         {
+            _builtScale = Ui.K;
+            _cards.Clear();
+
             BackColor = ObsTheme.WindowBg;
             ForeColor = ObsTheme.Text;
             Font = Ui.Font();
@@ -74,64 +86,39 @@ namespace RewardQueue
             themeBox.Controls.Add(themePicker);
             topBar.Controls.Add(themeBox);
 
-            // Содержимое прокручивается, если окно мало
-            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = ObsTheme.WindowBg };
+            // Содержимое прокручивается по вертикали, если окно невысокое
+            _content = new Panel { Dock = DockStyle.Fill, BackColor = ObsTheme.WindowBg };
+            var content = _content;
+            // Горизонтальной прокрутки нет: ширину карточек подгоняет LayoutContent. Без этого после сужения окна
+            // полоса остаётся от прежней ширины
+            content.HorizontalScroll.Enabled = false;
+            content.HorizontalScroll.Visible = false;
+            content.HorizontalScroll.Maximum = 0;
+            content.AutoScroll = true;
             content.HandleCreated += (s, e) => Ui.ApplyScrollbarTheme(content.Handle);
+            content.SizeChanged += (s, e) => LayoutContent();
 
-            int cardWidth = ClientSize.Width - Ui.Px(CardPad * 2) - SystemInformation.VerticalScrollBarWidth;
+            var addresses = AddCard(Loc.AddressesTitle);
+            AddText(addresses, Loc.AddressesIntro, 0, muted: true);
+            AddText(addresses, Loc.DockLabel, 16, bold: true);
+            AddAddressRow(addresses, "panel", 6);
+            AddText(addresses, Loc.DockHow, 6, muted: true);
+            AddText(addresses, Loc.OverlayLabel, 16, bold: true);
+            AddAddressRow(addresses, "overlay", 6);
+            AddText(addresses, Loc.OverlayHow, 6, muted: true);
+            AddText(addresses, Loc.SecretWarning, 14);
 
-            var addresses = new CardPanel
-            {
-                Text = Loc.AddressesTitle,
-                Bounds = new Rectangle(Ui.Px(CardPad), Ui.Px(4), cardWidth, Ui.Px(360)),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            content.Controls.Add(addresses);
-
-            AddText(addresses, Loc.AddressesIntro, 44, 40, muted: true);
-            AddText(addresses, Loc.DockLabel, 92, 22, bold: true);
-            AddAddressRow(addresses, "panel", 116);
-            AddText(addresses, Loc.DockHow, 156, 44, muted: true);
-            AddText(addresses, Loc.OverlayLabel, 208, 22, bold: true);
-            AddAddressRow(addresses, "overlay", 232);
-            AddText(addresses, Loc.OverlayHow, 272, 44, muted: true);
-            AddText(addresses, Loc.SecretWarning, 322, 24, muted: false);
-
-            var status = new CardPanel
-            {
-                Text = Loc.StatusTitle,
-                Bounds = new Rectangle(Ui.Px(CardPad), addresses.Bottom + Ui.Px(12), cardWidth, Ui.Px(160)),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            content.Controls.Add(status);
-
-            _serverLabel = AddText(status, "", 44, 24);
-            _clientsLabel = AddText(status, "", 70, 24);
-
-            _probeButton = new ThemedButton
-            {
-                Text = Loc.ProbeButton,
-                Bounds = new Rectangle(Ui.Px(CardPad), Ui.Px(104), Ui.Px(260), Ui.Px(32))
-            };
-            _probeButton.Click += (s, e) => StartProbe();
-            status.Controls.Add(_probeButton);
-
-            _probeLabel = new Label
-            {
-                AutoSize = false,
-                Bounds = new Rectangle(Ui.Px(CardPad + 272), Ui.Px(104), cardWidth - Ui.Px(CardPad * 2 + 272), Ui.Px(32)),
-                TextAlign = ContentAlignment.MiddleLeft,
-                BackColor = ObsTheme.BaseBg,
-                ForeColor = ObsTheme.TextMuted,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            status.Controls.Add(_probeLabel);
+            var status = AddCard(Loc.StatusTitle);
+            _serverLabel = AddText(status, "", 0);
+            _clientsLabel = AddText(status, "", 6);
+            AddProbeRow(status, 10);
 
             // Fill добавляется первым: при docking контролы раскладываются от последнего добавленного к первому
             Controls.Add(content);
             Controls.Add(topBar);
 
             UpdateLive();
+            LayoutContent();
         }
 
         // Меняет тему: запоминает её в конфиге и пересобирает окно
@@ -141,7 +128,11 @@ namespace RewardQueue
 
             Plugin.SetTheme(dark);
             ObsTheme.Apply(dark);
+            RebuildUi();
+        }
 
+        private void RebuildUi()
+        {
             _liveTimer.Stop();
             SuspendLayout();
             var old = new List<Control>();
@@ -153,49 +144,134 @@ namespace RewardQueue
             BuildUi();
             ResumeLayout(true);
 
-            Ui.ApplyWindowChrome(Handle);
+            if (IsHandleCreated) Ui.ApplyWindowChrome(Handle);
             Invalidate(true);
             _liveTimer.Start();
         }
 
-        private Label AddText(Control parent, string text, int top, int height, bool muted = false, bool bold = false)
+        // Масштаб экрана известен только когда у окна есть дескриптор: если окно открылось на мониторе с другим
+        // масштабом, чем при построении, подгоняем размер и пересобираем интерфейс
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Ui.ApplyWindowChrome(Handle);
+            ApplyScale(DeviceDpi / 96f, resizeWindow: true);
+        }
+
+        // Окно перетащили на монитор с другим масштабом: ОС уже изменила размер окна, интерфейс пересобираем
+        protected override void OnDpiChanged(DpiChangedEventArgs e)
+        {
+            base.OnDpiChanged(e);
+            ApplyScale(e.DeviceDpiNew / 96f, resizeWindow: false);
+        }
+
+        private void ApplyScale(float scale, bool resizeWindow)
+        {
+            if (Math.Abs(scale - _builtScale) < 0.01f) return;
+
+            if (resizeWindow)
+            {
+                float ratio = scale / _builtScale;
+                ClientSize = new Size((int)(ClientSize.Width * ratio), (int)(ClientSize.Height * ratio));
+            }
+
+            Ui.K = scale;
+            MinimumSize = SizeFromClientSize(new Size(Ui.Px(MinClientWidth), Ui.Px(MinClientHeight)));
+            RebuildUi();
+        }
+
+        // ---- раскладка ----
+
+        // Карточка: заголовок и столбец элементов. Элемент получает верхнюю границу и ширину, возвращает нижнюю границу
+        private sealed class Card
+        {
+            public readonly CardPanel Panel;
+            private readonly List<Func<int, int, int>> _items = new List<Func<int, int, int>>();
+
+            public Card(string title) => Panel = new CardPanel { Text = title };
+
+            public void Add(Func<int, int, int> item) => _items.Add(item);
+
+            public int Layout(int width)
+            {
+                int inner = width - Ui.Px(CardPad * 2);
+                int top = Ui.Px(44);
+                foreach (var item in _items) top = item(top, inner);
+
+                Panel.Size = new Size(width, top + Ui.Px(CardPad));
+                return Panel.Height;
+            }
+        }
+
+        private Card AddCard(string title)
+        {
+            var card = new Card(title);
+            _cards.Add(card);
+            _content.Controls.Add(card.Panel);
+            return card;
+        }
+
+        // Карточки занимают всю ширину окна. Ширину берём у окна, а не у панели: только что созданная панель свою ширину ещё не знает.
+        // Место под полосу прокрутки резервируется всегда, чтобы раскладка не прыгала при её появлении
+        private void LayoutContent()
+        {
+            if (_content == null || _cards.Count == 0) return;
+
+            int width = Math.Max(Ui.Px(300), ClientSize.Width - Ui.Px(CardPad * 2) - SystemInformation.VerticalScrollBarWidth);
+            int scrollTop = -_content.AutoScrollPosition.Y;
+
+            _content.SuspendLayout();
+            int y = Ui.Px(4);
+            foreach (var card in _cards)
+            {
+                int height = card.Layout(width);
+                card.Panel.Location = new Point(Ui.Px(CardPad), y - scrollTop);
+                y += height + Ui.Px(CardGap);
+            }
+            _content.AutoScrollMinSize = new Size(0, y + Ui.Px(CardPad));
+            _content.ResumeLayout(false);
+        }
+
+        // Подпись с переносом по словам: высота измеряется по ширине карточки
+        private Label AddText(Card card, string text, int gap, bool muted = false, bool bold = false)
         {
             var label = new Label
             {
                 Text = text,
                 AutoSize = false,
-                Bounds = new Rectangle(Ui.Px(CardPad), Ui.Px(top), parent.Width - Ui.Px(CardPad * 2), Ui.Px(height)),
+                UseMnemonic = false,
                 BackColor = ObsTheme.BaseBg,
                 ForeColor = muted ? ObsTheme.TextMuted : ObsTheme.Text,
-                Font = bold ? Ui.Font(FontStyle.Bold) : Ui.Font(),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                Font = bold ? Ui.Font(FontStyle.Bold) : Ui.Font()
             };
-            parent.Controls.Add(label);
+            card.Panel.Controls.Add(label);
+            card.Add((top, width) =>
+            {
+                top += Ui.Px(gap);
+                int height = MeasureHeight(label, width);
+                label.SetBounds(Ui.Px(CardPad), top, width, height);
+                return top + height;
+            });
             return label;
         }
 
-        // Строка «адрес + кнопка Копировать». Адрес собирается при каждом нажатии из текущих порта и ключа
-        private void AddAddressRow(Control parent, string page, int top)
+        private static int MeasureHeight(Label label, int width)
         {
-            int buttonWidth = Ui.Px(140);
-            int rowWidth = parent.Width - Ui.Px(CardPad * 2);
+            if (label.Text.Length == 0) return Ui.Px(20);
 
-            var box = new ThemedTextBox
-            {
-                Bounds = new Rectangle(Ui.Px(CardPad), Ui.Px(top), rowWidth - buttonWidth - Ui.Px(8), Ui.Px(32)),
-                Text = ServerGuard.BuildUrl(Plugin.Port, Plugin.AccessKey, page),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
+            const TextFormatFlags flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+            int height = TextRenderer.MeasureText(label.Text, label.Font, new Size(Math.Max(1, width), int.MaxValue), flags).Height;
+            return height + Ui.Px(4);
+        }
+
+        // Строка «адрес + кнопка Копировать». Адрес собирается при каждом нажатии из текущих порта и ключа
+        private void AddAddressRow(Card card, string page, int gap)
+        {
+            var box = new ThemedTextBox { Text = ServerGuard.BuildUrl(Plugin.Port, Plugin.AccessKey, page) };
             box.InnerTextBox.ReadOnly = true;
-            parent.Controls.Add(box);
+            card.Panel.Controls.Add(box);
 
-            var button = new ThemedButton
-            {
-                Text = Loc.Copy,
-                Glyph = Ui.GlyphCopy,
-                Bounds = new Rectangle(Ui.Px(CardPad) + rowWidth - buttonWidth, Ui.Px(top), buttonWidth, Ui.Px(32)),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
+            var button = new ThemedButton { Text = Loc.Copy, Glyph = Ui.GlyphCopy };
             button.Click += (s, e) =>
             {
                 try
@@ -209,7 +285,58 @@ namespace RewardQueue
                     Plugin.LogWarn($"Could not copy the address: {ex.Message}");
                 }
             };
-            parent.Controls.Add(button);
+            card.Panel.Controls.Add(button);
+
+            card.Add((top, width) =>
+            {
+                top += Ui.Px(gap);
+                int buttonWidth = Ui.Px(140);
+                int height = Ui.Px(32);
+                box.SetBounds(Ui.Px(CardPad), top, Math.Max(Ui.Px(80), width - buttonWidth - Ui.Px(8)), height);
+                button.SetBounds(Ui.Px(CardPad) + width - buttonWidth, top, buttonWidth, height);
+                return top + height;
+            });
+        }
+
+        // Кнопка проверки связи и результат: рядом, а если места мало, результат переносится под кнопку
+        private void AddProbeRow(Card card, int gap)
+        {
+            _probeButton = new ThemedButton { Text = Loc.ProbeButton };
+            _probeButton.Click += (s, e) => StartProbe();
+            card.Panel.Controls.Add(_probeButton);
+
+            _probeLabel = new Label
+            {
+                AutoSize = false,
+                UseMnemonic = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                BackColor = ObsTheme.BaseBg,
+                ForeColor = ObsTheme.TextMuted,
+                Font = Ui.Font()
+            };
+            card.Panel.Controls.Add(_probeLabel);
+
+            var button = _probeButton;
+            var label = _probeLabel;
+            card.Add((top, width) =>
+            {
+                top += Ui.Px(gap);
+                int buttonWidth = Ui.Px(260);
+                int height = Ui.Px(32);
+                button.SetBounds(Ui.Px(CardPad), top, Math.Min(buttonWidth, width), height);
+
+                int sideWidth = width - buttonWidth - Ui.Px(12);
+                if (sideWidth >= Ui.Px(200))
+                {
+                    label.SetBounds(Ui.Px(CardPad) + buttonWidth + Ui.Px(12), top, sideWidth, height);
+                    return top + height;
+                }
+
+                int below = top + height + Ui.Px(8);
+                int labelHeight = MeasureHeight(label, width);
+                label.SetBounds(Ui.Px(CardPad), below, width, labelHeight);
+                return below + labelHeight;
+            });
         }
 
         private static void ShowCopied(ThemedButton button)
@@ -232,24 +359,29 @@ namespace RewardQueue
         private void UpdateLive()
         {
             var server = LocalServer.Current;
-            _serverLabel.Text = server != null
+            bool changed = false;
+            changed |= SetText(_serverLabel, server != null
                 ? Loc.ServerRunning(server.Port)
-                : Loc.ServerFailed(LocalServer.StartError == "port is busy" ? Loc.PortBusy : LocalServer.StartError ?? "-");
-            _clientsLabel.Text = Loc.OpenPages(server?.ClientCount ?? 0);
+                : Loc.ServerFailed(LocalServer.StartError == "port is busy" ? Loc.PortBusy : LocalServer.StartError ?? "-"));
+            changed |= SetText(_clientsLabel, Loc.OpenPages(server?.ClientCount ?? 0));
 
             string? result = EventSubProbe.LastResult;
             bool running = EventSubProbe.Running;
             _probeButton.Enabled = !running;
-            _probeLabel.Text = running ? Loc.ProbeRunning
+            changed |= SetText(_probeLabel, running ? Loc.ProbeRunning
                 : result == null ? Loc.ProbeNotRun
                 : result.StartsWith("ok", StringComparison.Ordinal) ? Loc.ProbeOk
-                : Loc.ProbeFailed(result);
+                : Loc.ProbeFailed(result));
+
+            // новый текст мог занять другое число строк
+            if (changed) LayoutContent();
         }
 
-        protected override void OnHandleCreated(EventArgs e)
+        private static bool SetText(Label label, string text)
         {
-            base.OnHandleCreated(e);
-            Ui.ApplyWindowChrome(Handle);
+            if (label.Text == text) return false;
+            label.Text = text;
+            return true;
         }
 
         protected override void Dispose(bool disposing)
