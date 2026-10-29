@@ -33,6 +33,15 @@ namespace RewardQueue
         }
     }
 
+    /// <summary>
+    /// Область прокрутки, которая не прокручивается сама к элементу, получившему фокус. Без этого щелчок по плашке или ручке
+    /// подтягивал бы её в область видимости и сдвигал всё содержимое под рукой
+    /// </summary>
+    internal sealed class ScrollPanel : Panel
+    {
+        protected override Point ScrollToControl(Control activeControl) => DisplayRectangle.Location;
+    }
+
     /// <summary>Награда внутри очереди: плашка с названием, её можно перетащить в другую очередь</summary>
     internal sealed class RewardChip : Control
     {
@@ -61,8 +70,8 @@ namespace RewardQueue
 
             var rect = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
             using (var path = Ui.RoundedRect(rect, rect.Height / 2f))
-            using (var brush = new SolidBrush(ObsTheme.ChipBg))
-            using (var pen = new Pen(ObsTheme.CardBorder, 1f))
+            using (var brush = new SolidBrush(ObsTheme.ButtonBg))
+            using (var pen = new Pen(ObsTheme.ButtonBorderHover, 1f))
             {
                 g.FillPath(brush, path);
                 g.DrawPath(pen, path);
@@ -118,7 +127,8 @@ namespace RewardQueue
             QueueId = queue.id;
             CanDelete = canDelete;
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = ObsTheme.InputBg;
+            // Фон панели бледно-голубой: белые (в тёмной теме серые) поля ввода на нём видны
+            BackColor = PanelColor();
             Font = Ui.Font();
 
             _handle.BackColor = BackColor;
@@ -171,6 +181,8 @@ namespace RewardQueue
             _emptyHint.Visible = _chips.Count == 0;
             _delete.Visible = canDelete;
         }
+
+        private static Color PanelColor() => Ui.Mix(ObsTheme.BaseBg, ObsTheme.Primary, ObsTheme.IsDark ? 0.24f : 0.32f);
 
         /// <summary>Подсветка, когда над очередью держат награду, которую собираются в неё бросить</summary>
         [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -259,7 +271,7 @@ namespace RewardQueue
             var rect = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
             using var path = Ui.RoundedRect(rect, Ui.Px(4));
             using var fill = new SolidBrush(BackColor);
-            using var border = new Pen(_dropHot ? ObsTheme.FocusRing : ObsTheme.CardBorder, _dropHot ? 2f : 1f);
+            using var border = new Pen(_dropHot ? ObsTheme.FocusRing : Ui.Mix(ObsTheme.CardBorder, ObsTheme.FocusRing, 0.45f), _dropHot ? 2f : 1f);
             g.FillPath(fill, path);
             g.DrawPath(border, path);
         }

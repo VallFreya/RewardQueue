@@ -196,6 +196,39 @@ namespace RewardQueue.Tests
             }
         }
 
+        [Fact]
+        public void Window_CanBeMaximized_AndTheContentStillFits()
+        {
+            RunSta(() =>
+            {
+                using var auth = new TwitchAuth(Path.Combine(_fx.Dir, "max_auth.bin"));
+                var previousAuth = TwitchAuth.Current;
+                try
+                {
+                    auth.SetSnapshotForPreview(Snapshot("signed-in"));
+                    TwitchAuth.Current = auth;
+                    using var form = new SettingsForm();
+                    _ = form.Handle;
+                    form.Show();
+
+                    // кнопка «развернуть» доступна, и развёрнутое окно раскладывается без выхода за края
+                    Assert.True(form.MaximizeBox);
+                    form.WindowState = FormWindowState.Maximized;
+                    Application.DoEvents();
+                    Thread.Sleep(200);
+                    Application.DoEvents();
+
+                    Assert.Equal(FormWindowState.Maximized, form.WindowState);
+                    foreach (var card in Cards(form))
+                    {
+                        Assert.True(card.Left >= 0 && card.Right <= form.ClientSize.Width, $"карточка вышла за развёрнутое окно: «{card.Text}»");
+                    }
+                    form.WindowState = FormWindowState.Normal;
+                }
+                finally { TwitchAuth.Current = previousAuth; }
+            });
+        }
+
         [Theory]
         [InlineData("https://www.twitch.tv/activate?device-code=ABCD", true)]
         [InlineData("https://twitch.tv/activate", true)]

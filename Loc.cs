@@ -127,14 +127,16 @@ namespace RewardQueue
         public static string AddQueue => Ru ? "Добавить очередь" : "Add queue";
         public static string QueueNamePlaceholder => Ru ? "Название (необязательно)" : "Name (optional)";
         public static string QueueShowLimit => Ru ? "Показывать до:" : "Show up to:";
-        public static string QueueLimitHint => Ru ? "записей. 0: без ограничения" : "entries. 0: no limit";
+        public static string QueueLimitHint => Ru
+            ? "записей, только на трансляции (в оверлее). 0: без ограничения"
+            : "entries, on stream only (in the overlay). 0: no limit";
         public static string QueueEmpty => Ru ? "Здесь пока нет наград: перетащите их сюда из другой очереди" : "No rewards here yet: drag them here from another queue";
         public static string QueueDeleteTip => Ru ? "Удалить очередь: её награды перейдут в первую очередь" : "Delete the queue: its rewards move to the first queue";
         public static string QueueDragTip => Ru ? "Перетащите, чтобы поменять очереди местами" : "Drag to reorder the queues";
         public static string ShowTotal => Ru ? "Показывать всего записей:" : "Show entries in total:";
         public static string ShowTotalHint => Ru
-            ? "Для всех очередей вместе. Можно указать 0 (по умолчанию): тогда число записей на трансляции никак не ограничивается."
-            : "For all queues together. You can set 0 (the default): then the number of entries on stream is not limited in any way.";
+            ? "Только на трансляции (в оверлее), в доке видны все записи. Для всех очередей вместе. Можно указать 0 (по умолчанию): тогда число записей на трансляции никак не ограничивается."
+            : "On stream only (in the overlay), the dock shows all entries. For all queues together. You can set 0 (the default): then the number of entries on stream is not limited in any way.";
         public static string QueueFallbackName(int number) => Ru ? $"Очередь {number}" : $"Queue {number}";
         public static string RewardMissing(string id) => Ru ? $"(награда удалена на Twitch, {id})" : $"(reward removed on Twitch, {id})";
 

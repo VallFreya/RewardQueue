@@ -60,6 +60,13 @@ namespace UiPreview
             form.Show();
             Pump(600);
 
+            if (args.Length > 1 && args[1] == "scrolltest")
+            {
+                RunScrollTest(form);
+                LocalServer.StopCurrent();
+                return;
+            }
+
             if (args.Length > 1 && args[1] == "dragtest")
             {
                 RunDragTest(form);
@@ -71,7 +78,7 @@ namespace UiPreview
             foreach (string scenario in args.Skip(1))
             {
                 string[] parts = scenario.Split(':');
-                string[] size = parts[0].Split('x');
+                string[] size = parts[0] == "max" ? new[] { "0", "0" } : parts[0].Split('x');
                 bool dark = !parts.Contains("light");
                 auth.SetSnapshotForPreview(AuthSnapshotFor(parts));
                 form.SwitchTheme(dark);
@@ -84,6 +91,17 @@ namespace UiPreview
                     form.TriggerSaveHintForPreview();
                 }
                 float k = form.DeviceDpi / 96f;
+                // размер «max»: окно разворачивается на весь монитор
+                if (parts[0] == "max")
+                {
+                    form.WindowState = FormWindowState.Maximized;
+                    Pump(900);
+                    string maxFile = Path.Combine(outDir, $"{++n:00}_max{(dark ? "" : "_light")}.png");
+                    Capture(form, maxFile);
+                    Console.WriteLine($"{maxFile} dpi={form.DeviceDpi} client={form.ClientSize.Width}x{form.ClientSize.Height} state={form.WindowState}");
+                    form.WindowState = FormWindowState.Normal;
+                    continue;
+                }
                 form.ClientSize = new Size((int)(int.Parse(size[0]) * k), (int)(int.Parse(size[1]) * k));
                 Pump(700);
 
@@ -113,6 +131,43 @@ namespace UiPreview
             {
                 if (child is T match) yield return match;
                 foreach (var nested in All<T>(child)) yield return nested;
+            }
+        }
+
+        // Окно невысокое и прокручено: взять очередь или награду и подвигать мышью, прокрутка окна не должна меняться
+        private static void RunScrollTest(SettingsForm form)
+        {
+            form.ClientSize = new Size(form.ClientSize.Width, (int)(760 * form.DeviceDpi / 96f));
+            Pump(500);
+            form.Activate();
+            Pump(300);
+
+            foreach (int scrollTo in new[] { 0, 250, 500 })
+            {
+                foreach (string name in new[] { "handle", "chip" })
+                {
+                    // элементы каждый раз берутся заново: окно могло пересобраться
+                    var content = All<ScrollPanel>(form).First();
+                    var panels = All<QueuePanel>(form).OrderBy(p => p.Parent!.Top + p.Top).ToList();
+                    content.AutoScrollPosition = new Point(0, scrollTo);
+                    Pump(300);
+                    int offset = -content.AutoScrollPosition.Y;
+
+                    Control control = name == "handle" ? panels[0].Handle : panels[0].Chips.First();
+                    var rect = content.RectangleToScreen(content.ClientRectangle);
+                    var point = control.PointToScreen(new Point(control.Width / 2, control.Height / 2));
+                    if (!rect.Contains(point)) { Console.WriteLine($"scroll {scrollTo}, {name}: outside the visible area, skipped"); continue; }
+
+                    SetCursorPos(point.X, point.Y); Pump(80);
+                    mouse_event(LeftDown, 0, 0, 0, UIntPtr.Zero); Pump(80);
+                    for (int i = 1; i <= 6; i++) { SetCursorPos(point.X + i * 6, point.Y); Pump(60); }
+                    int during = -content.AutoScrollPosition.Y;
+                    Pump(250);   // подержать недолго, не у самого края
+                    int held = -content.AutoScrollPosition.Y;
+                    mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero); Pump(300);
+                    var after = All<ScrollPanel>(form).First();
+                    Console.WriteLine($"scroll {scrollTo}, {name}: before={offset} while moving={during} held={held} after drop={-after.AutoScrollPosition.Y} -> {(offset == during && offset == held ? "OK" : "SCROLLED")}");
+                }
             }
         }
 

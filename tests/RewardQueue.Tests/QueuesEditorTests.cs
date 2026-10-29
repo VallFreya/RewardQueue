@@ -372,6 +372,119 @@ namespace RewardQueue.Tests
         }
 
         [Fact]
+        public void UntickingAReward_RemovesItFromWhicheverQueueHoldsItAndRefreshesTheBlock()
+        {
+            RunSta(() =>
+            {
+                var previous = Plugin.Rewards;
+                try
+                {
+                    using var form = Open();
+                    Plugin.UpdateRewards(r => { var two = r.AddQueue(); return two.MoveReward("c", two.Queues[1].id); });
+                    form.RebuildUi();
+                    Pump();
+                    Assert.Equal(new[] { "c" }, Panels(form)[1].Chips.Select(c => c.RewardId).ToArray());
+
+                    // галочка у награды «c» (она лежит во второй очереди)
+                    var box = All<ThemedCheckBox>(form).Single(b => b.Text == "Награда c");
+                    box.Checked = false;
+                    Pump();
+
+                    Assert.False(Plugin.Rewards.IsTracked("c"));
+                    Assert.All(Plugin.Rewards.Queues, q => Assert.DoesNotContain("c", q.reward_ids));
+                    // и на экране плашки «c» нет ни в одной очереди
+                    Assert.All(Panels(form), p => Assert.DoesNotContain("c", p.Chips.Select(c => c.RewardId)));
+                    Assert.Empty(Panels(form)[1].Chips);
+                }
+                finally { Cleanup(previous); }
+            });
+        }
+
+        [Fact]
+        public void TickingAReward_PutsItIntoTheFirstQueueOnScreen()
+        {
+            RunSta(() =>
+            {
+                var previous = Plugin.Rewards;
+                try
+                {
+                    using var form = Open();
+                    All<ThemedCheckBox>(form).Single(b => b.Text == "Награда d").Checked = false;
+                    Pump();
+                    Assert.DoesNotContain("d", Panels(form).Single().Chips.Select(c => c.RewardId));
+
+                    All<ThemedCheckBox>(form).Single(b => b.Text == "Награда d").Checked = true;
+                    Pump();
+
+                    Assert.Contains("d", Panels(form)[0].Chips.Select(c => c.RewardId));
+                    Assert.Equal(Plugin.Rewards.FirstQueueId, Plugin.Rewards.QueueFor("d"));
+                }
+                finally { Cleanup(previous); }
+            });
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void QueuePanelColor_DiffersFromTheInputsSoTheyStayVisible(bool dark)
+        {
+            RunSta(() =>
+            {
+                var previous = Plugin.Rewards;
+                try
+                {
+                    Plugin.SetTheme(dark);
+                    ObsTheme.Apply(dark);
+                    var panel = new QueuePanel(new QueueConfig { id = "x" }, Array.Empty<(string, string)>(), false, new ToolTip());
+
+                    int Diff(Color a, Color b) => Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B);
+                    Assert.True(Diff(panel.BackColor, ObsTheme.InputBg) >= 30, $"поля сливаются с панелью: {panel.BackColor} и {ObsTheme.InputBg}");
+                    // панель голубоватая: синего в ней больше, чем красного
+                    Assert.True(panel.BackColor.B > panel.BackColor.R);
+                }
+                finally
+                {
+                    Plugin.SetTheme(true);
+                    Cleanup(previous);
+                }
+            });
+        }
+
+        [Fact]
+        public void ScrollingPanel_DoesNotScrollToTheControlThatGetsFocus()
+        {
+            RunSta(() =>
+            {
+                static (Panel Panel, Button Far) Make(Panel panel)
+                {
+                    panel.AutoScroll = true;
+                    panel.Size = new Size(300, 200);
+                    var near = new Button { Location = new Point(10, 10), Size = new Size(80, 30) };
+                    var far = new Button { Location = new Point(10, 1500), Size = new Size(80, 30) };
+                    panel.Controls.Add(near);
+                    panel.Controls.Add(far);
+                    return (panel, far);
+                }
+
+                using var form = new Form();
+                var (ordinary, ordinaryFar) = Make(new Panel());
+                var (ours, oursFar) = Make(new ScrollPanel());
+                form.Controls.Add(ordinary);
+                form.Controls.Add(ours);
+                ours.Left = 320;
+                form.Show();
+                Pump();
+
+                // обычная панель при фокусе уезжает к кнопке (так вёл себя щелчок по плашке), наша остаётся на месте
+                ordinaryFar.Focus();
+                oursFar.Focus();
+                Pump();
+                Assert.NotEqual(0, ordinary.AutoScrollPosition.Y);
+                Assert.Equal(0, ours.AutoScrollPosition.Y);
+            });
+        }
+
+        [Fact]
         public void ClosingTheWindow_SavesPendingEdits()
         {
             RunSta(() =>

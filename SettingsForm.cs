@@ -86,7 +86,7 @@ namespace RewardQueue
             AutoScaleMode = AutoScaleMode.None;
             Text = Loc.WindowTitle;
             ShowIcon = false;
-            MaximizeBox = false;
+            MaximizeBox = true;   // окно можно развернуть кнопкой или перетаскиванием к краю экрана
             StartPosition = FormStartPosition.CenterScreen;
 
             var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1366, 768);
@@ -154,7 +154,7 @@ namespace RewardQueue
             topBar.Controls.Add(themeBox);
 
             // Содержимое прокручивается по вертикали, если окно невысокое
-            _content = new Panel { Dock = DockStyle.Fill, BackColor = ObsTheme.WindowBg };
+            _content = new ScrollPanel { Dock = DockStyle.Fill, BackColor = ObsTheme.WindowBg };
             var content = _content;
             // Горизонтальной прокрутки нет: ширину карточек подгоняет LayoutContent. Без этого после сужения окна
             // полоса остаётся от прежней ширины
@@ -670,6 +670,7 @@ namespace RewardQueue
             _ghost.Size = new Size(Math.Min(Ui.Px(320), size.Width + Ui.Px(28)), Ui.Px(30));
             Controls.Add(_ghost);
             _ghost.BringToFront();
+            _edgeArmed = false;
             _dragScrollTimer.Start();
         }
 
@@ -763,6 +764,8 @@ namespace RewardQueue
         private void ResetDragState()
         {
             _dragScrollTimer.Stop();
+            _edgeDirection = 0;
+            _edgeArmed = false;
             _dragKind = DragKind.None;
             _dragId = "";
             _dragInsertIndex = -1;
@@ -777,18 +780,48 @@ namespace RewardQueue
             }
         }
 
-        // У верхнего и нижнего края списка перетаскивание прокручивает его
+        // Если держать перетаскиваемое у верхнего или нижнего края списка, список прокручивается. Только после небольшой
+        // задержки у края (примерно треть секунды): сразу после того, как элемент взяли, ничего не должно двигаться
+        private const int EdgeDwellMs = 350;
+        private int _edgeDirection;
+        private long _edgeSinceMs;
+        // Самопрокрутка включается, только когда курсор после начала перетаскивания побывал вне зоны края.
+        // Если элемент взяли прямо у края окна, список не должен уезжать из-под руки
+        private bool _edgeArmed;
+
         private void AutoScrollWhileDragging()
         {
             if (_dragKind == DragKind.None || _content == null) return;
 
             var at = _content.PointToClient(Cursor.Position);
-            int edge = Ui.Px(36), step = Ui.Px(22);
-            int delta = at.Y < edge ? -step : at.Y > _content.Height - edge ? step : 0;
-            if (delta == 0) return;
+            int edge = Ui.Px(28), step = Ui.Px(18);
+            int direction = at.Y < edge ? -1 : at.Y > _content.Height - edge ? 1 : 0;
+            if (direction == 0) _edgeArmed = true;
+            if (!_edgeArmed)
+            {
+                _edgeDirection = 0;
+                return;
+            }
 
             int current = -_content.AutoScrollPosition.Y;
-            _content.AutoScrollPosition = new Point(0, Math.Max(0, current + delta));
+            int max = Math.Max(0, _content.DisplayRectangle.Height - _content.ClientSize.Height);
+            bool canScroll = direction < 0 ? current > 0 : direction > 0 && current < max;
+            if (direction == 0 || !canScroll)
+            {
+                _edgeDirection = 0;
+                return;
+            }
+
+            long now = Environment.TickCount64;
+            if (direction != _edgeDirection)
+            {
+                _edgeDirection = direction;
+                _edgeSinceMs = now;
+                return;
+            }
+            if (now - _edgeSinceMs < EdgeDwellMs) return;
+
+            _content.AutoScrollPosition = new Point(0, Math.Clamp(current + direction * step, 0, max));
             MoveDrag(Cursor.Position);
         }
 
@@ -868,6 +901,8 @@ namespace RewardQueue
             {
                 ShowSaving(Plugin.UpdateRewards(r => r.WithTracked(id, box.Checked)));
                 UpdateLive();
+                // награда появляется в первой очереди или исчезает из той очереди, где лежала: блок очередей строится заново
+                if (IsHandleCreated) BeginInvoke(new Action(RebuildUi));
             };
             card.Panel.Controls.Add(box);
             card.Add((top, width) =>

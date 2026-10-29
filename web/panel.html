@@ -282,13 +282,15 @@
     document.querySelectorAll(".gbody").forEach((b) => { b.scrollTop = groupScroll.get(b.dataset.group) || 0; });
   }
 
-  // В группе всегда видны минимум три записи; если их больше, высота группы равна высоте первых трёх, остальные
-  // доступны прокруткой внутри группы. Так одна длинная очередь не вытесняет остальные группы за край дока
+  // Когда очередей несколько, в каждой видны минимум три записи; если их больше, высота очереди равна высоте первых трёх,
+  // остальные доступны прокруткой внутри очереди. Так одна длинная очередь не вытесняет остальные за край дока.
+  // Если очередь одна, ограничения нет: список растёт, а прокручивается весь док
   const VISIBLE_ENTRIES = 3;
   function limitGroups() {
     document.querySelectorAll(".gbody").forEach((body) => {
       body.style.maxHeight = "";
       body.classList.remove("scroll");
+      if (queueList.length <= 1) return;
       const cards = body.children;
       if (cards.length <= VISIBLE_ENTRIES) return;
       const third = cards[VISIBLE_ENTRIES - 1];
