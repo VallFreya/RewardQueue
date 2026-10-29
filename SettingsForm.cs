@@ -24,8 +24,6 @@ namespace RewardQueue
         private readonly List<Card> _cards = new List<Card>();
         private Label _serverLabel = null!;
         private Label _clientsLabel = null!;
-        private Label _probeLabel = null!;
-        private ThemedButton _probeButton = null!;
         private Label _authStatus = null!;
         private Label _authCode = null!;
         private ThemedButton _authOpen = null!;
@@ -127,7 +125,6 @@ namespace RewardQueue
             var status = AddCard(Loc.StatusTitle);
             _serverLabel = AddText(status, "", 0);
             _clientsLabel = AddText(status, "", 6);
-            AddProbeRow(status, 10);
 
             // Fill добавляется первым: при docking контролы раскладываются от последнего добавленного к первому
             Controls.Add(content);
@@ -317,47 +314,6 @@ namespace RewardQueue
             });
         }
 
-        // Кнопка проверки связи и результат: рядом, а если места мало, результат переносится под кнопку
-        private void AddProbeRow(Card card, int gap)
-        {
-            _probeButton = new ThemedButton { Text = Loc.ProbeButton };
-            _probeButton.Click += (s, e) => StartProbe();
-            card.Panel.Controls.Add(_probeButton);
-
-            _probeLabel = new Label
-            {
-                AutoSize = false,
-                UseMnemonic = false,
-                TextAlign = ContentAlignment.MiddleLeft,
-                BackColor = ObsTheme.BaseBg,
-                ForeColor = ObsTheme.TextMuted,
-                Font = Ui.Font()
-            };
-            card.Panel.Controls.Add(_probeLabel);
-
-            var button = _probeButton;
-            var label = _probeLabel;
-            card.Add((top, width) =>
-            {
-                top += Ui.Px(gap);
-                int buttonWidth = Ui.Px(260);
-                int height = Ui.Px(32);
-                button.SetBounds(Ui.Px(CardPad), top, Math.Min(buttonWidth, width), height);
-
-                int sideWidth = width - buttonWidth - Ui.Px(12);
-                if (sideWidth >= Ui.Px(200))
-                {
-                    label.SetBounds(Ui.Px(CardPad) + buttonWidth + Ui.Px(12), top, sideWidth, height);
-                    return top + height;
-                }
-
-                int below = top + height + Ui.Px(8);
-                int labelHeight = MeasureHeight(label, width);
-                label.SetBounds(Ui.Px(CardPad), below, width, labelHeight);
-                return below + labelHeight;
-            });
-        }
-
         private static void ShowCopied(ThemedButton button)
         {
             string normal = button.Text;
@@ -520,11 +476,6 @@ namespace RewardQueue
             return true;
         }
 
-        private static void StartProbe()
-        {
-            _ = Task.Run(EventSubProbe.RunAsync);
-        }
-
         private void UpdateLive()
         {
             var server = LocalServer.Current;
@@ -533,14 +484,6 @@ namespace RewardQueue
                 ? Loc.ServerRunning(server.Port)
                 : Loc.ServerFailed(LocalServer.StartError == "port is busy" ? Loc.PortBusy : LocalServer.StartError ?? "-"));
             changed |= SetText(_clientsLabel, Loc.OpenPages(server?.ClientCount ?? 0));
-
-            string? result = EventSubProbe.LastResult;
-            bool running = EventSubProbe.Running;
-            _probeButton.Enabled = !running;
-            changed |= SetText(_probeLabel, running ? Loc.ProbeRunning
-                : result == null ? Loc.ProbeNotRun
-                : result.StartsWith("ok", StringComparison.Ordinal) ? Loc.ProbeOk
-                : Loc.ProbeFailed(result));
 
             // новый текст мог занять другое число строк
             if (changed) LayoutContent();

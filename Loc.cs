@@ -103,10 +103,5 @@ namespace RewardQueue
         public static string ServerFailed(string reason) => Ru ? $"Локальный сервер не запущен: {reason}" : $"Local server is not running: {reason}";
         public static string PortBusy => Ru ? "порт занят другой программой" : "the port is used by another program";
         public static string OpenPages(int count) => Ru ? $"Открытых страниц очереди: {count}" : $"Open queue pages: {count}";
-        public static string ProbeButton => Ru ? "Проверить связь с Twitch" : "Check the Twitch connection";
-        public static string ProbeNotRun => Ru ? "Проверка ещё не выполнялась" : "Not checked yet";
-        public static string ProbeRunning => Ru ? "Проверяю…" : "Checking…";
-        public static string ProbeOk => Ru ? "Связь с Twitch есть" : "Connected to Twitch";
-        public static string ProbeFailed(string detail) => Ru ? $"Не удалось подключиться: {detail}" : $"Could not connect: {detail}";
     }
 }

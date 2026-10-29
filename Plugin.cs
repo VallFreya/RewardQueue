@@ -143,8 +143,6 @@ namespace RewardQueue
             try
             {
                 LocalServer.StartCurrent(Port, AccessKey);
-                // Пробное подключение к EventSub: результат в журнале и в окне настроек (временно, пока нет настоящего входа)
-                _ = Task.Run(EventSubProbe.RunAsync);
             }
             catch (Exception ex)
             {
