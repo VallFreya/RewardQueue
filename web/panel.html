@@ -10,31 +10,64 @@
     --window: #1d1f26; --base: #272a33; --border: #343846;
     --text: #ffffff; --muted: #a8a8a8;
     --button: #3c404d; --button-hover: #464b59; --button-border: #5b6273;
-    --ok: #7bd88f; --bad: #ff7b7b;
+    --input: #1d1f26; --primary: #284cb8; --primary-hover: #476bd7;
+    --ok-bg: #2f4a3d; --ok-border: #57906f; --ok: #8cd1a6;
+    --bad-bg: #4b2f37; --bad-border: #9a5560; --bad: #e8929c;
     color-scheme: dark;
   }
   :root[data-theme="light"] {
     --window: #cdcdcd; --base: #e8e8e8; --border: #aeaeae;
     --text: #0a0a0a; --muted: #575757;
     --button: #f5f5f5; --button-hover: #fefefe; --button-border: #828282;
-    --ok: #1c7a35; --bad: #b3261e;
+    --input: #fefefe; --primary: #8cb5ff; --primary-hover: #b2cfff;
+    --ok-bg: #d8ebdf; --ok-border: #8dbb9e; --ok: #2e7d4f;
+    --bad-bg: #f3dada; --bad-border: #cb8f8f; --bad: #b03a48;
     color-scheme: light;
   }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 12px; font: 14px/1.45 "Segoe UI", sans-serif; background: var(--window); color: var(--text); }
   header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; }
-  h1 { font-size: 15px; margin: 0; }
-  label { color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  select, button { font: inherit; color: var(--text); background: var(--button); border: 1px solid var(--button); border-radius: 4px; padding: 5px 10px; }
-  select { padding-right: 4px; }
+  h1 { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px; }
+  .count { font-size: 12px; font-weight: 600; padding: 1px 9px; border-radius: 999px; background: var(--button); color: var(--text); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
+  .dot.on { background: var(--ok); }
+  label.theme { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  select, input, textarea, button { font: inherit; color: var(--text); border-radius: 4px; }
+  select, button { background: var(--button); border: 1px solid var(--button); padding: 5px 10px; }
   button { cursor: pointer; }
-  button:hover, select:hover { background: var(--button-hover); border-color: var(--button-border); }
-  .card { background: var(--base); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; }
-  .row { margin: 6px 0; }
-  .muted { color: var(--muted); }
-  .ok { color: var(--ok); }
-  .bad { color: var(--bad); }
-  .counter { font-size: 24px; font-weight: 600; }
+  button:hover:not(:disabled), select:hover { background: var(--button-hover); border-color: var(--button-border); }
+  button:disabled { opacity: .55; cursor: default; }
+  input, textarea, select.field { width: 100%; background: var(--input); border: 1px solid var(--button); padding: 6px 8px; }
+  input:focus, textarea:focus, select:focus { outline: 1px solid var(--primary-hover); }
+  textarea { resize: vertical; min-height: 56px; }
+
+  .banner { margin: 0 0 12px; padding: 8px 12px; border-radius: 4px; background: var(--bad-bg); border: 1px solid var(--bad-border); color: var(--bad); }
+  .banner[hidden] { display: none; }
+  .empty { padding: 20px 14px; text-align: center; color: var(--muted); background: var(--base); border: 1px solid var(--border); border-radius: 4px; }
+  .empty[hidden] { display: none; }
+
+  .entry { background: var(--base); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; margin-bottom: 8px; }
+  .entry.first { background: var(--ok-bg); border-color: var(--ok-border); }
+  .head { display: flex; align-items: baseline; gap: 8px; }
+  .num { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.4em; }
+  .title { font-weight: 600; flex: 1; overflow-wrap: anywhere; }
+  .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
+  .who { margin-top: 2px; color: var(--ok); font-weight: 600; overflow-wrap: anywhere; }
+  .msg { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .done { background: var(--ok-bg); border-color: var(--ok-border); }
+  .remove { background: var(--bad-bg); border-color: var(--bad-border); }
+
+  details { margin-top: 12px; background: var(--base); border: 1px solid var(--border); border-radius: 4px; }
+  summary { cursor: pointer; padding: 9px 12px; font-weight: 600; }
+  form { padding: 0 12px 12px; display: grid; gap: 8px; }
+  form label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 2px; }
+  .primary { background: var(--primary); border-color: var(--primary); }
+  .primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .note { color: var(--muted); font-size: 12px; min-height: 1.2em; }
+  .note.bad { color: var(--bad); }
+  .note.ok { color: var(--ok); }
 </style>
 <script>
   // Тема применяется до отрисовки, чтобы страница не мигала. Хранится в браузере дока; по умолчанию тёмная
@@ -47,44 +80,188 @@
 </head>
 <body>
 <header>
-  <h1>Очередь наград</h1>
-  <label>Тема
+  <h1><span id="dot" class="dot" title="Связь с плагином"></span>Очередь наград <span id="count" class="count">0</span></h1>
+  <label class="theme">Тема
     <select id="theme">
       <option value="dark">Тёмная</option>
       <option value="light">Светлая</option>
     </select>
   </label>
 </header>
-<div class="card">
-  <div class="row">Связь с плагином: <span id="state" class="bad">нет</span></div>
-  <div class="row">Время на сервере: <span id="time" class="muted">—</span></div>
-  <div class="row">Счётчик: <span id="counter" class="counter">—</span></div>
-  <div class="row"><button id="bump">+1 (команда плагину)</button></div>
-</div>
+
+<div id="offline" class="banner" hidden>Нет связи с плагином. Страница переподключится сама.</div>
+<div id="empty" class="empty">Очередь пуста</div>
+<div id="list"></div>
+
+<details id="add">
+  <summary>Добавить вручную</summary>
+  <form id="addForm" autocomplete="off">
+    <div>
+      <label for="reward">Награда</label>
+      <select id="reward" class="field"></select>
+    </div>
+    <div id="customRow">
+      <label for="custom">Название</label>
+      <input id="custom" maxlength="100" placeholder="Например, Заказ техники">
+    </div>
+    <div>
+      <label for="user">Ник (необязательно)</label>
+      <input id="user" maxlength="50">
+    </div>
+    <div>
+      <label for="input">Сообщение (необязательно)</label>
+      <textarea id="input" maxlength="500"></textarea>
+    </div>
+    <div><button id="addButton" class="primary" type="submit">Добавить в очередь</button></div>
+    <div id="addNote" class="note"></div>
+  </form>
+</details>
+
 <script>
   const key = new URLSearchParams(location.search).get("key") || "";
-  const stateEl = document.getElementById("state");
-  const timeEl = document.getElementById("time");
-  const counterEl = document.getElementById("counter");
-  const themeEl = document.getElementById("theme");
+  const q = "key=" + encodeURIComponent(key);
+  const $ = (id) => document.getElementById(id);
+  const OTHER = "__other__";
 
+  // ---- тема ----
+  const themeEl = $("theme");
   themeEl.value = document.documentElement.getAttribute("data-theme");
   themeEl.onchange = () => {
     document.documentElement.setAttribute("data-theme", themeEl.value);
     try { localStorage.setItem("rq-panel-theme", themeEl.value); } catch (e) { }
   };
 
-  const source = new EventSource("/events?key=" + encodeURIComponent(key));
-  source.onopen = () => { stateEl.textContent = "есть"; stateEl.className = "ok"; };
-  source.onerror = () => { stateEl.textContent = "нет, переподключаюсь…"; stateEl.className = "bad"; };
-  source.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === "tick") timeEl.textContent = msg.time;
-    if (msg.type === "counter") counterEl.textContent = msg.value;
+  // ---- очередь ----
+  function formatTime(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    if (d.toDateString() === new Date().toDateString()) return time;
+    return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }) + " " + time;
+  }
+
+  function el(tag, className, text) {
+    const e = document.createElement(tag);
+    if (className) e.className = className;
+    if (text !== undefined) e.textContent = text;   // только textContent: тексты зрителей не должны становиться HTML
+    return e;
+  }
+
+  async function command(button, path, id) {
+    button.disabled = true;
+    try {
+      const r = await fetch(path + "?" + q + "&id=" + encodeURIComponent(id), { method: "POST" });
+      // 404: записи уже нет (убрали в другом месте), это не ошибка; состояние придёт по обычному каналу
+      if (!r.ok && r.status !== 404) throw new Error(r.status);
+    } catch (e) {
+      button.disabled = false;
+      $("offline").textContent = "Не удалось выполнить команду. Проверьте, что плагин работает.";
+      $("offline").hidden = false;
+    }
+  }
+
+  function renderEntries(entries) {
+    const list = $("list");
+    list.textContent = "";
+    entries.forEach((entry, i) => {
+      const card = el("article", "entry" + (i === 0 ? " first" : ""));
+
+      const head = el("div", "head");
+      head.append(el("span", "num", String(i + 1)), el("span", "title", entry.reward_title));
+      if (entry.source === "manual") head.append(el("span", "tag", "вручную"));
+      head.append(el("span", "time", formatTime(entry.redeemed_at)));
+      card.append(head);
+
+      if (entry.user_name) card.append(el("div", "who", entry.user_name));
+      if (entry.user_input) card.append(el("div", "msg", entry.user_input));
+
+      const actions = el("div", "actions");
+      const done = el("button", "done", "Выполнено");
+      done.onclick = () => command(done, "/api/done", entry.id);
+      const remove = el("button", "remove", "Убрать");
+      remove.onclick = () => command(remove, "/api/remove", entry.id);
+      actions.append(done, remove);
+      card.append(actions);
+
+      list.append(card);
+    });
+    $("empty").hidden = entries.length > 0;
+    $("count").textContent = String(entries.length);
+  }
+
+  // ---- ручное добавление ----
+  let rewardsKey = null;
+  function renderRewards(rewards) {
+    const signature = JSON.stringify(rewards);
+    if (signature === rewardsKey) return;   // список не менялся: форму не трогаем, чтобы не сбить ввод
+    rewardsKey = signature;
+
+    const select = $("reward");
+    const previous = select.value;
+    select.textContent = "";
+    rewards.forEach((r) => {
+      const option = el("option", "", r.title || r.id);
+      option.value = r.title || r.id;
+      select.append(option);
+    });
+    const other = el("option", "", rewards.length ? "Другое…" : "Своё название");
+    other.value = OTHER;
+    select.append(other);
+
+    if ([...select.options].some((o) => o.value === previous)) select.value = previous;
+    updateCustomRow();
+  }
+
+  function updateCustomRow() {
+    $("customRow").hidden = $("reward").value !== OTHER;
+  }
+  $("reward").onchange = updateCustomRow;
+
+  $("addForm").onsubmit = async (event) => {
+    event.preventDefault();
+    const title = $("reward").value === OTHER ? $("custom").value.trim() : $("reward").value;
+    const note = $("addNote");
+    if (!title) {
+      note.className = "note bad";
+      note.textContent = "Укажите название награды.";
+      return;
+    }
+
+    $("addButton").disabled = true;
+    try {
+      const r = await fetch("/api/add?" + q, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, user: $("user").value, input: $("input").value })
+      });
+      if (!r.ok) throw new Error(r.status);
+      $("user").value = "";
+      $("input").value = "";
+      note.className = "note ok";
+      note.textContent = "Добавлено.";
+      setTimeout(() => { if (note.textContent === "Добавлено.") note.textContent = ""; }, 3000);
+    } catch (e) {
+      note.className = "note bad";
+      note.textContent = "Не удалось добавить запись.";
+    } finally {
+      $("addButton").disabled = false;
+    }
   };
 
-  document.getElementById("bump").onclick = () =>
-    fetch("/api/bump?key=" + encodeURIComponent(key), { method: "POST" });
+  // ---- связь с плагином ----
+  function connect() {
+    const source = new EventSource("/events?" + q);
+    source.onopen = () => { $("dot").classList.add("on"); $("offline").hidden = true; };
+    source.onerror = () => { $("dot").classList.remove("on"); $("offline").textContent = "Нет связи с плагином. Страница переподключится сама."; $("offline").hidden = false; };
+    source.onmessage = (e) => {
+      let message;
+      try { message = JSON.parse(e.data); } catch (err) { return; }
+      if (message.type !== "state") return;
+      renderEntries(message.entries || []);
+      renderRewards(message.rewards || []);
+    };
+  }
+  connect();
 </script>
 </body>
 </html>

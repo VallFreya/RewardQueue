@@ -5,16 +5,100 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Очередь наград</title>
 <style>
-  /* Страница для трансляции: фон прозрачный, лишнего текста нет. Пока очередь пуста, не видно ничего */
-  html, body { margin: 0; background: transparent; overflow: hidden; }
+  /* Страница для трансляции: фон прозрачный, размер задаёт источник «Браузер» в OBS.
+     Награды идут сверху вниз по порядку заказа и показываются, пока целиком помещаются по высоте. */
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  #list { position: absolute; inset: 0; overflow: hidden; font: 600 28px/1.25 "Segoe UI", sans-serif; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, .85); }
+  .entry { margin: 0 0 14px; overflow-wrap: anywhere; }
+  .title { font-size: 1em; }
+  .who { font-size: .72em; font-weight: 600; color: #9fe0b5; }
+  .msg { font-size: .72em; font-weight: 400; white-space: pre-wrap; opacity: .95; }
+  /* обрезка по числу строк (только когда сама первая запись не помещается в блок) */
+  .clamp { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 </style>
 </head>
 <body>
+<div id="list"></div>
 <script>
-  // Страница держит связь с плагином; сами награды появятся здесь на следующем шаге
   const key = new URLSearchParams(location.search).get("key") || "";
-  const source = new EventSource("/events?key=" + encodeURIComponent(key));
-  source.onmessage = () => { };
+  const list = document.getElementById("list");
+  let entries = [];
+
+  function makeEntry(entry) {
+    const card = document.createElement("div");
+    card.className = "entry";
+
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = entry.reward_title;   // только textContent: тексты зрителей не должны становиться HTML
+    card.append(title);
+
+    if (entry.user_name) {
+      const who = document.createElement("div");
+      who.className = "who";
+      who.textContent = entry.user_name;
+      card.append(who);
+    }
+    if (entry.user_input) {
+      const msg = document.createElement("div");
+      msg.className = "msg";
+      msg.textContent = entry.user_input;
+      card.append(msg);
+    }
+    return card;
+  }
+
+  // Запись целиком внутри блока: её нижний край не ниже нижнего края списка
+  function fits(card) {
+    return card.getBoundingClientRect().bottom <= list.getBoundingClientRect().bottom + 0.5;
+  }
+
+  function lineCount(part) {
+    const lineHeight = parseFloat(getComputedStyle(part).lineHeight) || part.getBoundingClientRect().height;
+    return Math.max(1, Math.round(part.getBoundingClientRect().height / lineHeight));
+  }
+
+  // Первая запись не помещается: обрезаем текст многоточием по целым строкам, сначала сообщение, потом ник, потом название
+  function fitFirst(card) {
+    const parts = [".msg", ".who", ".title"].map((s) => card.querySelector(s)).filter(Boolean);
+    for (const part of parts) {
+      for (let lines = lineCount(part) - 1; lines >= 1; lines--) {
+        part.classList.add("clamp");
+        part.style.webkitLineClamp = String(lines);
+        if (fits(card)) return;
+      }
+    }
+  }
+
+  // Показываем записи по порядку, пока очередная целиком помещается, и останавливаемся на первой, которая не влезла:
+  // следующие после неё не показываем, даже если они короткие
+  function render() {
+    list.textContent = "";
+    for (let i = 0; i < entries.length; i++) {
+      const card = makeEntry(entries[i]);
+      list.append(card);
+      if (fits(card)) continue;
+
+      if (i === 0) fitFirst(card);   // единственное исключение: первая запись показывается всегда, но обрезанной
+      else card.remove();
+      break;
+    }
+  }
+
+  window.addEventListener("resize", render);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
+
+  function connect() {
+    const source = new EventSource("/events?key=" + encodeURIComponent(key));
+    source.onmessage = (e) => {
+      let message;
+      try { message = JSON.parse(e.data); } catch (err) { return; }
+      if (message.type !== "state") return;
+      entries = message.entries || [];
+      render();
+    };
+  }
+  connect();
 </script>
 </body>
 </html>
