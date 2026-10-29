@@ -32,10 +32,15 @@ namespace RewardQueue
 
         // Перетаскивание мышью (без OLE): наград между очередями и самих очередей
         internal enum DragKind { None, Reward, Queue }
+
+        /// <summary>Окно-«призрак» перетаскиваемого блока (null, если ничего не перетаскивают); для проверок</summary>
+        internal Form? DragGhost => _ghost;
         private DragKind _dragKind;
         private string _dragId = "";
         private string _dragSourceQueue = "";
-        private Label? _ghost;
+        private DragGhostForm? _ghost;
+        private Control? _lifted;
+        private Point _grabOffset;
         private QueuePanel? _dragHot;
         private int _dragInsertIndex = -1;
         private Panel? _insertLine;
@@ -248,22 +253,37 @@ namespace RewardQueue
             CancelDrag();
             int scroll = _content == null ? 0 : -_content.AutoScrollPosition.Y;
 
+            // На время пересборки окно не перерисовывается: иначе виден каждый промежуточный кадр (белая вспышка)
             _liveTimer.Stop();
-            SuspendLayout();
-            var old = new List<Control>();
-            foreach (Control control in Controls) old.Add(control);
-            Controls.Clear();
-            foreach (var control in old) control.Dispose();
-            _tip.Dispose();
+            bool redraw = IsHandleCreated;
+            if (redraw) SendMessage(Handle, WmSetRedraw, IntPtr.Zero, IntPtr.Zero);
+            try
+            {
+                SuspendLayout();
+                var old = new List<Control>();
+                foreach (Control control in Controls) old.Add(control);
+                Controls.Clear();
+                foreach (var control in old) control.Dispose();
+                _tip.Dispose();
 
-            BuildUi();
-            ResumeLayout(true);
-            if (scroll > 0) _content.AutoScrollPosition = new Point(0, scroll);
+                BuildUi();
+                ResumeLayout(true);
+                if (scroll > 0) _content.AutoScrollPosition = new Point(0, scroll);
+            }
+            finally
+            {
+                if (redraw) SendMessage(Handle, WmSetRedraw, (IntPtr)1, IntPtr.Zero);
+            }
 
             if (IsHandleCreated) Ui.ApplyWindowChrome(Handle);
             Invalidate(true);
             _liveTimer.Start();
         }
+
+        private const int WmSetRedraw = 0x000B;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
         // Масштаб экрана известен только когда у окна есть дескриптор: если окно открылось на мониторе с другим
         // масштабом, чем при построении, подгоняем размер и пересобираем интерфейс
@@ -496,6 +516,19 @@ namespace RewardQueue
 
         // ---- очереди ----
 
+        // Плашки наград в очередях приводятся в соответствие с настройками; остальное в окне не трогается
+        private void RefreshQueueChips()
+        {
+            var settings = Plugin.Rewards;
+            foreach (var panel in _queuePanels)
+            {
+                var queue = settings.Queue(panel.QueueId);
+                if (queue == null) continue;
+                panel.SetRewards(queue.reward_ids.Select(id => (id, RewardTitle(id))).ToList());
+            }
+            LayoutContent();
+        }
+
         private string RewardTitle(string id)
         {
             var known = Plugin.Rewards.Known.FirstOrDefault(r => r.id == id);
@@ -563,6 +596,7 @@ namespace RewardQueue
                 panel.DeleteClicked += () => ApplyStructural(r => r.RemoveQueue(queueId));
                 AttachDrag(panel.Handle, DragKind.Queue, queueId, () => QueueLabel(queueId));
                 foreach (var chip in panel.Chips) AttachDrag(chip, DragKind.Reward, chip.RewardId, () => chip.Text);
+                panel.ChipAdded += chip => AttachDrag(chip, DragKind.Reward, chip.RewardId, () => chip.Text);
 
                 _queuePanels.Add(panel);
                 card.Panel.Controls.Add(panel);
@@ -655,21 +689,44 @@ namespace RewardQueue
                 ? _queuePanels.FirstOrDefault(p => p.Chips.Any(c => c.RewardId == id))?.QueueId ?? ""
                 : id;
 
-            _ghost = new Label
+            // Под курсором летает копия всего перетаскиваемого блока (очереди целиком или плашки награды), а на его месте
+            // остаётся пунктирный контур. Блок «держится» за ту точку, за которую его взяли
+            Control? source = kind == DragKind.Queue
+                ? _queuePanels.FirstOrDefault(p => p.QueueId == id)
+                : _queuePanels.SelectMany(p => p.Chips).FirstOrDefault(c => c.RewardId == id);
+
+            Bitmap image;
+            Point origin;
+            if (source != null && source.Width > 0 && source.Height > 0 && source.IsHandleCreated)
             {
-                Text = text,
-                AutoSize = false,
-                UseMnemonic = false,
-                TextAlign = ContentAlignment.MiddleCenter,
-                ForeColor = ObsTheme.Text,
-                BackColor = ObsTheme.Primary,
-                Font = Ui.Font(FontStyle.Bold),
-                Enabled = false
-            };
-            var size = TextRenderer.MeasureText(text, _ghost.Font);
-            _ghost.Size = new Size(Math.Min(Ui.Px(320), size.Width + Ui.Px(28)), Ui.Px(30));
-            Controls.Add(_ghost);
-            _ghost.BringToFront();
+                image = new Bitmap(source.Width, source.Height);
+                source.DrawToBitmap(image, new Rectangle(Point.Empty, source.Size));
+                origin = source.PointToScreen(Point.Empty);
+                _grabOffset = _armedControl != null
+                    ? new Point(_armedAt.X - origin.X, _armedAt.Y - origin.Y)
+                    : new Point(source.Width / 2, source.Height / 2);
+            }
+            else
+            {
+                // блока на экране нет (проверки без окна): рисуем плашку с названием
+                var size = TextRenderer.MeasureText(text, Font);
+                image = new Bitmap(Math.Max(40, size.Width + Ui.Px(28)), Ui.Px(30));
+                using (var g = Graphics.FromImage(image))
+                {
+                    g.Clear(ObsTheme.Primary);
+                    TextRenderer.DrawText(g, text, Font, new Rectangle(Point.Empty, image.Size), ObsTheme.Text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                }
+                origin = Cursor.Position;
+                _grabOffset = new Point(image.Width / 2, image.Height / 2);
+            }
+
+            _ghost = new DragGhostForm(image) { Location = origin };
+            _ghost.Show(this);
+
+            if (source is QueuePanel queuePanel) queuePanel.Lifted = true;
+            else if (source is RewardChip chip) chip.Lifted = true;
+            _lifted = source;
+
             _edgeArmed = false;
             _dragScrollTimer.Start();
         }
@@ -679,12 +736,7 @@ namespace RewardQueue
         {
             if (_dragKind == DragKind.None) return;
 
-            if (_ghost != null)
-            {
-                var at = PointToClient(screen);
-                _ghost.Location = new Point(at.X + Ui.Px(14), at.Y + Ui.Px(10));
-                _ghost.BringToFront();
-            }
+            if (_ghost != null) _ghost.Location = new Point(screen.X - _grabOffset.X, screen.Y - _grabOffset.Y);
 
             if (_dragKind == DragKind.Reward)
             {
@@ -774,10 +826,17 @@ namespace RewardQueue
             if (_insertLine != null) _insertLine.Visible = false;
             if (_ghost != null)
             {
-                Controls.Remove(_ghost);
                 _ghost.Dispose();
                 _ghost = null;
             }
+
+            // перетаскиваемое возвращается на место (если окно при этом не пересобрано: тогда элемента уже нет)
+            if (_lifted != null && !_lifted.IsDisposed)
+            {
+                if (_lifted is QueuePanel queuePanel) queuePanel.Lifted = false;
+                else if (_lifted is RewardChip chip) chip.Lifted = false;
+            }
+            _lifted = null;
         }
 
         // Если держать перетаскиваемое у верхнего или нижнего края списка, список прокручивается. Только после небольшой
@@ -901,8 +960,9 @@ namespace RewardQueue
             {
                 ShowSaving(Plugin.UpdateRewards(r => r.WithTracked(id, box.Checked)));
                 UpdateLive();
-                // награда появляется в первой очереди или исчезает из той очереди, где лежала: блок очередей строится заново
-                if (IsHandleCreated) BeginInvoke(new Action(RebuildUi));
+                // награда появляется в первой очереди или исчезает из той очереди, где лежала: меняются только плашки в очередях,
+                // окно не пересобирается (иначе оно мигало бы)
+                RefreshQueueChips();
             };
             card.Panel.Controls.Add(box);
             card.Add((top, width) =>
@@ -1112,6 +1172,8 @@ namespace RewardQueue
                 _ => Loc.AuthSignIn
             };
             _authAction.Primary = snapshot.State == AuthState.SignedOut;
+            // «Выйти» бледно-красная: это действие, которое отменяет вход
+            _authAction.Tone = snapshot.State == AuthState.SignedIn ? ButtonTone.Danger : ButtonTone.Normal;
             _authAction.Enabled = auth != null;
             _authAction.Invalidate();
             return true;

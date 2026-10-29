@@ -47,6 +47,21 @@ namespace RewardQueue
     {
         public string RewardId { get; }
 
+        private bool _lifted;
+
+        /// <summary>Плашку перетаскивают: на её месте остаётся пунктирный контур</summary>
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public bool Lifted
+        {
+            get => _lifted;
+            set
+            {
+                if (_lifted == value) return;
+                _lifted = value;
+                Invalidate();
+            }
+        }
+
         public RewardChip(string rewardId, string title)
         {
             RewardId = rewardId;
@@ -69,6 +84,14 @@ namespace RewardQueue
             g.Clear(Parent?.BackColor ?? ObsTheme.BaseBg);
 
             var rect = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
+            if (_lifted)
+            {
+                using var outline = Ui.RoundedRect(rect, rect.Height / 2f);
+                using var dashed = new Pen(ObsTheme.FocusRing, 1.5f) { DashStyle = DashStyle.Dash };
+                g.DrawPath(dashed, outline);
+                return;
+            }
+
             using (var path = Ui.RoundedRect(rect, rect.Height / 2f))
             using (var brush = new SolidBrush(ObsTheme.ButtonBg))
             using (var pen = new Pen(ObsTheme.ButtonBorderHover, 1f))
@@ -79,6 +102,77 @@ namespace RewardQueue
 
             TextRenderer.DrawText(g, Text, Font, new Rectangle(Ui.Px(12), 0, Width - Ui.Px(24), Height), ObsTheme.Text,
                 TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    /// <summary>Пунктирный контур на месте очереди, которую перетаскивают</summary>
+    internal sealed class LiftedVeil : Control
+    {
+        public LiftedVeil()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            TabStop = false;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(ObsTheme.BaseBg);
+
+            var rect = new RectangleF(1.5f, 1.5f, Width - 3, Height - 3);
+            using var path = Ui.RoundedRect(rect, Ui.Px(4));
+            using var dashed = new Pen(ObsTheme.FocusRing, 1.5f) { DashStyle = DashStyle.Dash };
+            g.DrawPath(dashed, path);
+        }
+    }
+
+    /// <summary>
+    /// «Призрак» перетаскиваемого: полупрозрачное окно с картинкой всего блока, которое следует за курсором.
+    /// Не берёт фокус и пропускает мышь сквозь себя
+    /// </summary>
+    internal sealed class DragGhostForm : Form
+    {
+        private const int WsExToolWindow = 0x80, WsExNoActivate = 0x08000000, WsExTransparent = 0x20;
+
+        private readonly Bitmap _image;
+
+        public DragGhostForm(Bitmap image)
+        {
+            _image = image;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            AutoScaleMode = AutoScaleMode.None;
+            TopMost = true;
+            Opacity = 0.82;
+            Size = image.Size;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer, true);
+        }
+
+        protected override bool ShowWithoutActivation => true;
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.ExStyle |= WsExToolWindow | WsExNoActivate | WsExTransparent;
+                return cp;
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.DrawImageUnscaled(_image, 0, 0);
+            using var pen = new Pen(ObsTheme.FocusRing, 2f);
+            e.Graphics.DrawRectangle(pen, 1, 1, Width - 3, Height - 3);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _image.Dispose();
+            base.Dispose(disposing);
         }
     }
 
@@ -121,6 +215,9 @@ namespace RewardQueue
         public event Action<int>? LimitEdited;
 
         public event Action? DeleteClicked;
+
+        /// <summary>Появилась новая плашка награды (после SetRewards): окно подключает к ней перетаскивание</summary>
+        public event Action<RewardChip>? ChipAdded;
 
         public QueuePanel(QueueConfig queue, IReadOnlyList<(string Id, string Title)> rewards, bool canDelete, ToolTip tip)
         {
@@ -172,14 +269,61 @@ namespace RewardQueue
             _emptyHint.BackColor = BackColor;
 
             Controls.AddRange(new Control[] { _handle, _name, _delete, _limitLabel, _limit, _limitHint, _emptyHint });
+            PopulateChips(rewards, raiseEvent: false);
+            _delete.Visible = canDelete;
+        }
+
+        /// <summary>
+        /// Заменяет награды очереди, не трогая остальное содержимое панели (поля и введённый в них текст остаются).
+        /// Нужна, когда награду отметили или сняли галочку: окно при этом не пересобирается и не мигает
+        /// </summary>
+        public void SetRewards(IReadOnlyList<(string Id, string Title)> rewards) => PopulateChips(rewards, raiseEvent: true);
+
+        private void PopulateChips(IReadOnlyList<(string Id, string Title)> rewards, bool raiseEvent)
+        {
+            foreach (var old in _chips)
+            {
+                Controls.Remove(old);
+                old.Dispose();
+            }
+            _chips.Clear();
+
             foreach (var (id, title) in rewards)
             {
                 var chip = new RewardChip(id, title) { BackColor = BackColor };
                 _chips.Add(chip);
                 Controls.Add(chip);
+                if (raiseEvent) ChipAdded?.Invoke(chip);
             }
             _emptyHint.Visible = _chips.Count == 0;
-            _delete.Visible = canDelete;
+        }
+
+        private Control? _veil;
+
+        /// <summary>
+        /// Очередь перетаскивают: её копия летает под курсором, а на месте остаётся пустой пунктирный контур.
+        /// Содержимое закрывает «завеса» поверх всего, ручка при этом сохраняет захват мыши
+        /// </summary>
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public bool Lifted
+        {
+            get => _veil != null;
+            set
+            {
+                if (value == (_veil != null)) return;
+                if (value)
+                {
+                    _veil = new LiftedVeil { Dock = DockStyle.Fill };
+                    Controls.Add(_veil);
+                    _veil.BringToFront();
+                }
+                else
+                {
+                    Controls.Remove(_veil);
+                    _veil!.Dispose();
+                    _veil = null;
+                }
+            }
         }
 
         private static Color PanelColor() => Ui.Mix(ObsTheme.BaseBg, ObsTheme.Primary, ObsTheme.IsDark ? 0.24f : 0.32f);

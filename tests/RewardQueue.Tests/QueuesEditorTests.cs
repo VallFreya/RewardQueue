@@ -423,6 +423,124 @@ namespace RewardQueue.Tests
             });
         }
 
+        [Fact]
+        public void TickingARewardTwice_DoesNotRebuildTheWindow()
+        {
+            RunSta(() =>
+            {
+                var previous = Plugin.Rewards;
+                try
+                {
+                    using var form = Open();
+                    var panelBefore = Panels(form).Single();
+                    var scrollBefore = All<ScrollPanel>(form).Single();
+                    var nameBefore = panelBefore.NameBox;
+                    nameBefore.Text = "Черновик";   // набранное в поле не должно пропадать и при щелчках по галочкам
+
+                    var box = All<ThemedCheckBox>(form).Single(b => b.Text == "Награда b");
+                    box.Checked = false;
+                    Pump();
+                    box.Checked = true;
+                    Pump();
+
+                    // те же самые элементы: окно не пересобиралось, значит, и не мигало
+                    Assert.Same(panelBefore, Panels(form).Single());
+                    Assert.Same(scrollBefore, All<ScrollPanel>(form).Single());
+                    Assert.Same(box, All<ThemedCheckBox>(form).Single(b => b.Text == "Награда b"));
+                    Assert.Equal("Черновик", Panels(form).Single().NameBox.Text);
+                    Assert.Contains("b", Panels(form).Single().Chips.Select(c => c.RewardId));
+                }
+                finally { Cleanup(previous); }
+            });
+        }
+
+        [Fact]
+        public void NewChipsAfterTicking_CanBeDragged()
+        {
+            RunSta(() =>
+            {
+                var previous = Plugin.Rewards;
+                try
+                {
+                    using var form = Open();
+                    Plugin.UpdateRewards(r => r.AddQueue());
+                    form.RebuildUi();
+                    Pump();
+                    var box = All<ThemedCheckBox>(form).Single(b => b.Text == "Награда d");
+                    box.Checked = false;
+                    Pump();
+                    box.Checked = true;   // плашка «d» создана заново без пересборки окна
+                    Pump();
+
+                    var panels = Panels(form);
+                    form.BeginDrag(SettingsForm.DragKind.Reward, "d", "Награда d");
+                    form.MoveDrag(Center(panels[1]));
+                    form.EndDrag(Center(panels[1]), apply: true);
+                    Pump();
+
+                    Assert.Equal(Plugin.Rewards.Queues[1].id, Plugin.Rewards.QueueFor("d"));
+                }
+                finally { Cleanup(previous); }
+            });
+        }
+
+        [Fact]
+        public void DraggingAQueue_MovesAWholeCopyOfTheBlockAndLeavesAnOutline()
+        {
+            RunSta(() =>
+            {
+                var previous = Plugin.Rewards;
+                try
+                {
+                    using var form = Open();
+                    Plugin.UpdateRewards(r => r.AddQueue());
+                    form.RebuildUi();
+                    Pump();
+                    var panel = Panels(form)[0];
+
+                    form.BeginDrag(SettingsForm.DragKind.Queue, panel.QueueId, "Очередь 1");
+
+                    // копия размером со всю очередь, а не с её название; на месте очереди пунктирный контур
+                    Assert.NotNull(form.DragGhost);
+                    Assert.Equal(panel.Size, form.DragGhost!.Size);
+                    Assert.True(panel.Lifted);
+
+                    // копия держится за ту точку, за которую очередь «взяли» (здесь её середина)
+                    var cursor = new Point(500, 400);
+                    form.MoveDrag(cursor);
+                    Assert.Equal(new Point(cursor.X - panel.Width / 2, cursor.Y - panel.Height / 2), form.DragGhost.Location);
+
+                    form.CancelDrag();
+                    Assert.Null(form.DragGhost);
+                    Assert.False(panel.Lifted);
+                }
+                finally { Cleanup(previous); }
+            });
+        }
+
+        [Fact]
+        public void DraggingAReward_MovesAWholeCopyOfTheChip()
+        {
+            RunSta(() =>
+            {
+                var previous = Plugin.Rewards;
+                try
+                {
+                    using var form = Open();
+                    var chip = Panels(form).Single().Chips.First();
+
+                    form.BeginDrag(SettingsForm.DragKind.Reward, chip.RewardId, chip.Text);
+
+                    Assert.Equal(chip.Size, form.DragGhost!.Size);
+                    Assert.True(chip.Lifted);
+                    form.CancelDrag();
+                    Assert.False(chip.Lifted);
+                    Assert.Null(form.DragGhost);
+                }
+                finally { Cleanup(previous); }
+            });
+        }
+
         [Theory]
         [InlineData(true)]
         [InlineData(false)]

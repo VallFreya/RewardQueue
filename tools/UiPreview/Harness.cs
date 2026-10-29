@@ -195,6 +195,8 @@ namespace UiPreview
             mouse_event(LeftDown, 0, 0, 0, UIntPtr.Zero);
             Pump(80);
             for (int i = 1; i <= 10; i++) Move(new Point(from.X + (to.X - from.X) * i / 10, from.Y + (to.Y - from.Y) * i / 10));
+            Pump(200);
+            ShotScreen(form.Bounds, Path.Combine(Path.GetTempPath(), "RewardQueueUiTest", "drag_mid_reward.png"));
             mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero);
             Pump(600);
             Console.WriteLine($"after reward drag: reward {rewardId} in {(Plugin.Rewards.QueueFor(rewardId) == secondQueue ? "SECOND" : "not second")} queue");
@@ -208,9 +210,19 @@ namespace UiPreview
             mouse_event(LeftDown, 0, 0, 0, UIntPtr.Zero);
             Pump(80);
             for (int i = 1; i <= 10; i++) Move(new Point(handle.X + (top.X - handle.X) * i / 10, handle.Y + (top.Y - handle.Y) * i / 10));
+            Pump(200);
+            ShotScreen(form.Bounds, Path.Combine(Path.GetTempPath(), "RewardQueueUiTest", "drag_mid_queue.png"));
             mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero);
             Pump(600);
             Console.WriteLine($"after queue drag: first queue is {(Plugin.Rewards.FirstQueueId == movedId ? "the dragged one" : "unchanged")}");
+        }
+
+        // Снимок экрана (вместе с окнами поверх формы, например с «призраком» перетаскиваемого)
+        private static void ShotScreen(Rectangle area, string file)
+        {
+            using var bmp = new Bitmap(area.Width, area.Height);
+            using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(area.Location, Point.Empty, area.Size);
+            bmp.Save(file, ImageFormat.Png);
         }
 
         private static void Pump(int ms)

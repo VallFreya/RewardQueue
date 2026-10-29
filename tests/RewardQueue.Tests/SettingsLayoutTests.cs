@@ -196,6 +196,37 @@ namespace RewardQueue.Tests
             }
         }
 
+        // «Выйти» бледно-красная, «Войти» главная (синяя), остальные состояния обычные
+        [Theory]
+        [InlineData("signed-in", ButtonToneCheck.Danger)]
+        [InlineData("signed-out", ButtonToneCheck.Primary)]
+        [InlineData("waiting", ButtonToneCheck.Normal)]
+        public void MainLoginButton_ColorFollowsTheState(string authState, ButtonToneCheck expected)
+        {
+            RunSta(() =>
+            {
+                using var auth = new TwitchAuth(Path.Combine(_fx.Dir, "button_auth.bin"));
+                var previousAuth = TwitchAuth.Current;
+                try
+                {
+                    auth.SetSnapshotForPreview(Snapshot(authState));
+                    TwitchAuth.Current = auth;
+                    using var form = new SettingsForm();
+                    _ = form.Handle;
+                    form.Show();
+
+                    string text = authState switch { "signed-in" => Loc.AuthSignOut, "signed-out" => Loc.AuthSignIn, _ => Loc.Cancel };
+                    var button = Cards(form).OrderBy(c => c.Top).First().Controls.OfType<ThemedButton>().Single(b => b.Text == text);
+
+                    Assert.Equal(expected == ButtonToneCheck.Danger, button.Tone == ButtonTone.Danger);
+                    Assert.Equal(expected == ButtonToneCheck.Primary, button.Primary);
+                }
+                finally { TwitchAuth.Current = previousAuth; }
+            });
+        }
+
+        public enum ButtonToneCheck { Normal, Primary, Danger }
+
         [Fact]
         public void Window_CanBeMaximized_AndTheContentStillFits()
         {
