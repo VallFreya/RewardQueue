@@ -59,14 +59,15 @@
   .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
   .who { color: var(--ok); font-weight: 700; overflow-wrap: anywhere; }
   .current .who { color: var(--text); font-size: 16px; }
+  .rline { margin-top: 2px; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
   .msg { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .start { background: var(--primary); border-color: var(--primary); }
   .start:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
   .done { background: var(--ok-bg); border-color: var(--ok-border); }
   .remove { background: var(--bad-bg); border-color: var(--bad-border); }
-  .current-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; color: var(--ok); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
-  .rtitle { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
+  .current-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; color: var(--ok); margin-bottom: 4px; }
+  .qempty { color: var(--muted); font-size: 12px; padding: 0 2px 6px; }
   .group { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   .dot-r { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
 
@@ -112,7 +113,6 @@
 <main id="content">
   <div id="offline" class="banner" hidden>Нет связи с плагином. Страница переподключится сама.</div>
   <div id="empty" class="empty">Очередь пуста</div>
-  <div id="current"></div>
   <div id="list"></div>
 </main>
 
@@ -126,6 +126,10 @@
     <div id="customRow">
       <label for="custom">Название</label>
       <input id="custom" maxlength="100" placeholder="Например, Заказ техники">
+    </div>
+    <div id="queueRow">
+      <label for="queue">Очередь</label>
+      <select id="queue" class="field"></select>
     </div>
     <div>
       <label for="user">Ник (необязательно)</label>
@@ -183,11 +187,11 @@
     }
   }
 
-  // Цвет награды: один и тот же для одной награды (по названию), чтобы группы легко различались
+  // Цвет награды (и очереди): один и тот же для одного названия, чтобы их легко различать
   const PALETTE = ["#7aa2ff", "#ff9ec7", "#ffc66e", "#7be0c3", "#c3a2ff", "#ff8b7a", "#9fd86e", "#6ec9ff"];
-  function colorFor(title) {
+  function colorFor(text) {
     let h = 0;
-    for (const ch of title) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0;
     return PALETTE[h % PALETTE.length];
   }
 
@@ -197,20 +201,10 @@
     return b;
   }
 
-  // Запись целиком: номер в очереди, ник, время, сообщение и кнопки. В группе название награды стоит в заголовке группы,
-  // а у «делаемой» записи оно показано в её собственной шапке
+  // Запись целиком: номер в своей очереди, ник, время, награда, сообщение и кнопки
   function entryCard(entry, number, isCurrent) {
     const card = el("article", "entry" + (isCurrent ? " current" : ""));
-
-    if (isCurrent) {
-      const label = el("div", "current-label", "Сейчас делаю");
-      const rt = el("span", "rtitle");
-      const dot = el("span", "dot-r");
-      dot.style.setProperty("--c", colorFor(entry.reward_title));
-      rt.append(dot, document.createTextNode(entry.reward_title));
-      label.append(rt);
-      card.append(label);
-    }
+    if (isCurrent) card.append(el("div", "current-label", "Сейчас делаю"));
 
     const head = el("div", "head");
     head.append(el("span", "num", "№" + number));
@@ -218,6 +212,12 @@
     if (entry.source === "manual") head.append(el("span", "tag", "вручную"));
     head.append(el("span", "time", formatTime(entry.redeemed_at)));
     card.append(head);
+
+    const rline = el("div", "rline");
+    const dot = el("span", "dot-r");
+    dot.style.setProperty("--c", colorFor(entry.reward_title));
+    rline.append(dot, document.createTextNode(entry.reward_title));
+    card.append(rline);
 
     if (entry.user_input) card.append(el("div", "msg", entry.user_input));
 
@@ -237,38 +237,40 @@
     return card;
   }
 
-  // Сверху запись, которую делают; ниже остальные по наградам. Порядок групп по тому, чья запись выше в очереди,
-  // порядок внутри группы по очереди. Номер у записи общий: место в очереди
-  function renderEntries(entries) {
-    const current = $("current");
+  let queueList = [{ id: "main", name: "" }];
+  function queueTitle(queue, index) {
+    return queue.name || "Очередь " + (index + 1);
+  }
+
+  // Очереди по порядку из настроек. В каждой своя запись «Сейчас делаю» сверху (если есть) и своя нумерация с 1.
+  // Заголовок очереди показывается, если очередей больше одной или у очереди есть название
+  function renderEntries(state) {
+    const entries = state.entries || [];
+    queueList = state.queues && state.queues.length ? state.queues : [{ id: "main", name: "" }];
     const list = $("list");
 
-    // прокрутка страницы и групп сохраняется: состояние приходит на каждое изменение очереди
+    // прокрутка страницы и очередей сохраняется: состояние приходит на каждое изменение
     const pageScroll = $("content").scrollTop;
     const groupScroll = new Map([...document.querySelectorAll(".gbody")].map((b) => [b.dataset.group, b.scrollTop]));
-    current.textContent = "";
     list.textContent = "";
 
-    const working = entries.length > 0 && entries[0].in_progress ? entries[0] : null;
-    if (working) current.append(entryCard(working, 1, true));
+    const byQueue = new Map(queueList.map((queue) => [queue.id, []]));
+    entries.forEach((entry) => (byQueue.get(entry.queue_id) || byQueue.get(queueList[0].id)).push(entry));
 
-    const groups = new Map();
-    entries.forEach((entry, i) => {
-      if (entry === working) return;
-      if (!groups.has(entry.reward_title)) groups.set(entry.reward_title, []);
-      groups.get(entry.reward_title).push({ entry, number: i + 1 });
-    });
-
-    groups.forEach((items, title) => {
-      const header = el("div", "group");
-      const dot = el("span", "dot-r");
-      dot.style.setProperty("--c", colorFor(title));
-      header.append(dot, document.createTextNode(title + " · " + items.length));
-      list.append(header);
+    queueList.forEach((queue, index) => {
+      const items = byQueue.get(queue.id);
+      if (queueList.length > 1 || queue.name) {
+        const header = el("div", "group");
+        const dot = el("span", "dot-r");
+        dot.style.setProperty("--c", PALETTE[index % PALETTE.length]);
+        header.append(dot, document.createTextNode(queueTitle(queue, index) + " \u00b7 " + items.length));
+        list.append(header);
+      }
 
       const body = el("div", "gbody");
-      body.dataset.group = title;
-      items.forEach(({ entry, number }) => body.append(entryCard(entry, number, false)));
+      body.dataset.group = queue.id;
+      if (items.length === 0 && queueList.length > 1) body.append(el("div", "qempty", "Пусто"));
+      items.forEach((entry, i) => body.append(entryCard(entry, i + 1, entry.in_progress && i === 0)));
       list.append(body);
     });
 
@@ -300,30 +302,44 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(limitGroups);
 
   // ---- ручное добавление ----
-  let rewardsKey = null;
-  function renderRewards(rewards) {
-    const signature = JSON.stringify(rewards);
-    if (signature === rewardsKey) return;   // список не менялся: форму не трогаем, чтобы не сбить ввод
-    rewardsKey = signature;
+  // Награда из списка сама определяет очередь; для своего названия очередь выбирается (если их больше одной)
+  let formKey = null;
+  function renderRewards(state) {
+    const rewards = state.rewards || [];
+    const signature = JSON.stringify([rewards, queueList.map((x) => [x.id, x.name])]);
+    if (signature === formKey) return;   // ничего не менялось: форму не трогаем, чтобы не сбить ввод
+    formKey = signature;
 
     const select = $("reward");
     const previous = select.value;
     select.textContent = "";
     rewards.forEach((r) => {
       const option = el("option", "", r.title || r.id);
-      option.value = r.title || r.id;
+      option.value = r.id;
       select.append(option);
     });
     const other = el("option", "", rewards.length ? "Другое…" : "Своё название");
     other.value = OTHER;
     select.append(other);
-
     if ([...select.options].some((o) => o.value === previous)) select.value = previous;
+
+    const queueSelect = $("queue");
+    const previousQueue = queueSelect.value;
+    queueSelect.textContent = "";
+    queueList.forEach((queue, index) => {
+      const option = el("option", "", queueTitle(queue, index));
+      option.value = queue.id;
+      queueSelect.append(option);
+    });
+    if ([...queueSelect.options].some((o) => o.value === previousQueue)) queueSelect.value = previousQueue;
+
     updateCustomRow();
   }
 
   function updateCustomRow() {
-    $("customRow").hidden = $("reward").value !== OTHER;
+    const custom = $("reward").value === OTHER;
+    $("customRow").hidden = !custom;
+    $("queueRow").hidden = !custom || queueList.length <= 1;
   }
   $("reward").onchange = updateCustomRow;
 
@@ -339,7 +355,9 @@
 
   $("addForm").onsubmit = async (event) => {
     event.preventDefault();
-    const title = $("reward").value === OTHER ? $("custom").value.trim() : $("reward").value;
+    const custom = $("reward").value === OTHER;
+    const select = $("reward");
+    const title = custom ? $("custom").value.trim() : select.options[select.selectedIndex].textContent;
     const note = $("addNote");
     if (!title) {
       note.className = "note bad";
@@ -352,7 +370,13 @@
       const r = await fetch("/api/add?" + q, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, user: $("user").value, input: $("input").value })
+        body: JSON.stringify({
+          title,
+          user: $("user").value,
+          input: $("input").value,
+          reward_id: custom ? "" : select.value,
+          queue_id: custom ? $("queue").value : ""
+        })
       });
       if (!r.ok) throw new Error(r.status);
       $("user").value = "";
@@ -377,8 +401,8 @@
       let message;
       try { message = JSON.parse(e.data); } catch (err) { return; }
       if (message.type !== "state") return;
-      renderEntries(message.entries || []);
-      renderRewards(message.rewards || []);
+      renderEntries(message);
+      renderRewards(message);
     };
   }
   connect();

@@ -6,10 +6,13 @@
 <title>Очередь наград</title>
 <style>
   /* Страница для трансляции: фон прозрачный, размер задаёт источник «Браузер» в OBS.
-     Запись, которую делают сейчас (кнопка «Делаю»), показывается крупной карточкой, остальные идут списком.
-     Если никто не выбран, все записи идут списком. Записи показываются, пока целиком помещаются по высоте. */
+     Очереди идут одна под другой; у очереди может быть название. В каждой очереди запись, которую делают сейчас
+     (кнопка «Делаю»), показывается крупной карточкой, остальные списком. Записи показываются, пока целиком помещаются по высоте. */
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
   #list { position: absolute; inset: 0; overflow: hidden; font: 400 20px/1.3 "Segoe UI", sans-serif; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, .85); }
+
+  .queue { margin: 0 0 20px; }
+  .qname { margin: 0 0 8px; font-size: .78em; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: #9fe0b5; overflow-wrap: anywhere; }
 
   .now { margin: 0 0 14px; padding: 12px 16px; background: rgba(18, 20, 28, .82); border: 2px solid #9fe0b5; border-radius: 14px; text-shadow: none; overflow-wrap: anywhere; }
   .now .label { font-size: .62em; letter-spacing: .1em; text-transform: uppercase; color: #9fe0b5; font-weight: 700; }
@@ -29,7 +32,7 @@
 <script>
   const key = new URLSearchParams(location.search).get("key") || "";
   const list = document.getElementById("list");
-  let entries = [];
+  let state = { entries: [], queues: [], show_total: 0 };
 
   function div(className, text) {
     const e = document.createElement("div");
@@ -72,7 +75,7 @@
     return item;
   }
 
-  // Записи идут по порядку заказа; «делаемая» запись всегда первая
+  // Записи очереди идут по порядку заказа; «делаемая» запись всегда первая. Номер считается в своей очереди
   function makeCard(entry, index) {
     return entry.in_progress && index === 0 ? makeCurrent(entry) : makeItem(entry, index + 1);
   }
@@ -87,7 +90,7 @@
     return Math.max(1, Math.round(part.getBoundingClientRect().height / lineHeight));
   }
 
-  // Первая запись не помещается: обрезаем текст многоточием по целым строкам.
+  // Самая первая запись на экране не помещается: обрезаем текст многоточием по целым строкам.
   // У карточки сначала сообщение, потом ник; у строки списка вся строка
   function fitFirst(card) {
     const parts = card.classList.contains("now")
@@ -106,18 +109,58 @@
     if (label && !fits(card)) label.remove();
   }
 
-  // Показываем записи по порядку, пока очередная целиком помещается, и останавливаемся на первой, которая не влезла:
-  // следующие после неё не показываем, даже если они короткие
+  // Очереди идут по порядку одна под другой. Для каждой: название (если есть), затем записи, пока очередная целиком
+  // помещается, остановка на первой не влезшей (следующие в этой очереди не показываем, даже короткие).
+  // Очереди независимы: не влезла запись одной, следующая очередь всё равно показывается, если для неё есть место.
+  // Лимиты: «Показывать до» у очереди и «Показывать всего» на все очереди (0 без ограничения); запись «Сейчас» в лимиты не входит.
+  // Единственное исключение из правила «целиком»: самая первая запись на экране показывается всегда, но обрезанной
   function render() {
     list.textContent = "";
-    for (let i = 0; i < entries.length; i++) {
-      const card = makeCard(entries[i], i);
-      list.append(card);
-      if (fits(card)) continue;
 
-      if (i === 0) fitFirst(card);   // единственное исключение: первая запись показывается всегда, но обрезанной
-      else card.remove();
-      break;
+    const queues = state.queues && state.queues.length ? state.queues : [{ id: "main", name: "", show_limit: 0 }];
+    const byQueue = new Map(queues.map((queue) => [queue.id, []]));
+    (state.entries || []).forEach((entry) => (byQueue.get(entry.queue_id) || byQueue.get(queues[0].id)).push(entry));
+
+    let remaining = state.show_total > 0 ? state.show_total : Infinity;
+    let anything = false;
+
+    for (const queue of queues) {
+      const entries = byQueue.get(queue.id);
+      if (entries.length === 0) continue;
+
+      const block = div("queue");
+      if (queue.name) block.append(div("qname", queue.name));
+      list.append(block);
+
+      const limit = queue.show_limit > 0 ? queue.show_limit : Infinity;
+      let shown = 0;
+      let cards = 0;
+
+      for (let i = 0; i < entries.length; i++) {
+        const current = entries[i].in_progress && i === 0;
+        if (!current && (shown >= limit || remaining <= 0)) break;
+
+        const card = makeCard(entries[i], i);
+        block.append(card);
+        if (fits(card)) {
+          cards++;
+          if (!current) { shown++; remaining--; }
+          continue;
+        }
+
+        if (!anything && cards === 0) {
+          // самая первая запись на экране: показывается обрезанной
+          fitFirst(card);
+          cards++;
+        } else {
+          card.remove();
+        }
+        break;
+      }
+
+      // название без записей под ним не показываем
+      if (cards === 0) block.remove();
+      else anything = true;
     }
   }
 
@@ -130,7 +173,7 @@
       let message;
       try { message = JSON.parse(e.data); } catch (err) { return; }
       if (message.type !== "state") return;
-      entries = message.entries || [];
+      state = message;
       render();
     };
   }
