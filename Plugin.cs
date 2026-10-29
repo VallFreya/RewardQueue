@@ -36,6 +36,9 @@ namespace RewardQueue
         public static int Port { get; private set; } = ServerGuard.DefaultPort;
         public static string AccessKey { get; private set; } = "";
 
+        /// <summary>Сколько дней хранится невыполненная запись очереди</summary>
+        public static int RetentionDays { get; private set; } = QueueState.DefaultRetentionDays;
+
         private static IntPtr _moduleName = IntPtr.Zero;
         private static int _settingsOpen;
 
@@ -246,6 +249,7 @@ namespace RewardQueue
                 ThemeDark = !string.Equals(config!.theme, "light", StringComparison.OrdinalIgnoreCase);
                 Port = ServerGuard.ClampPort(config.port);
                 AccessKey = ServerGuard.IsValidKey(config.access_key) ? config.access_key : "";
+                RetentionDays = QueueState.ClampRetentionDays(config.retention_days);
                 LogInfo($"Loaded config from '{configPath}'");
             }
             catch (Exception ex)
@@ -301,7 +305,7 @@ namespace RewardQueue
             try
             {
                 configPath = GetConfigFilePath();
-                var config = new PluginConfig { theme = ThemeDark ? "dark" : "light", port = Port, access_key = AccessKey };
+                var config = new PluginConfig { theme = ThemeDark ? "dark" : "light", port = Port, access_key = AccessKey, retention_days = RetentionDays };
 
                 string json = JsonSerializer.Serialize(config, JsonContext.PluginConfig);
                 AtomicFile.WriteAllText(configPath, json, Encoding.UTF8);

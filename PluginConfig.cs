@@ -12,6 +12,8 @@ namespace RewardQueue
         public int port { get; set; } = ServerGuard.DefaultPort;
         // Ключ в адресах страниц. Создаётся при первом запуске и не меняется, чтобы док не приходилось добавлять заново
         public string access_key { get; set; } = "";
+        // Сколько дней хранится невыполненная запись очереди; потом она удаляется
+        public int retention_days { get; set; } = QueueState.DefaultRetentionDays;
     }
 
     // Source Generator для NativeAOT (убирает требование рефлексии)
