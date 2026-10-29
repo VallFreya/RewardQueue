@@ -20,6 +20,8 @@ namespace RewardQueue
         public List<RewardInfo> known_rewards { get; set; } = new List<RewardInfo>();
         // Очереди и награды, заказы которых в них попадают. Пока очередь одна, но формат рассчитан на несколько
         public List<QueueConfig> queues { get; set; } = new List<QueueConfig>();
+        // Сколько записей всего показывать на трансляции по всем очередям вместе; 0 без ограничения
+        public int show_total { get; set; }
     }
 
     // Награда канала Twitch: id не меняется при переименовании, название только для показа
@@ -33,6 +35,8 @@ namespace RewardQueue
     {
         public string id { get; set; } = QueueState.MainQueueId;
         public string name { get; set; } = "";
+        // Сколько записей этой очереди показывать на трансляции (первые по порядку), остальные скрываются; 0 без ограничения
+        public int show_limit { get; set; }
         // id наград, заказы которых попадают в эту очередь
         public List<string> reward_ids { get; set; } = new List<string>();
     }

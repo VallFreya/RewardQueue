@@ -381,7 +381,7 @@ namespace RewardQueue
                 AccessKey = ServerGuard.IsValidKey(config.access_key) ? config.access_key : "";
                 RetentionDays = QueueState.ClampRetentionDays(config.retention_days);
                 ClientIdOverride = TwitchAuth.ValidClientId(config.client_id) ? config.client_id : "";
-                Rewards = RewardSettings.FromConfig(config.known_rewards, config.queues);
+                Rewards = RewardSettings.FromConfig(config.known_rewards, config.queues, config.show_total);
                 LogInfo($"Loaded config from '{configPath}'");
             }
             catch (Exception ex)
@@ -438,7 +438,7 @@ namespace RewardQueue
             {
                 configPath = GetConfigFilePath();
                 var config = new PluginConfig { theme = ThemeDark ? "dark" : "light", port = Port, access_key = AccessKey, retention_days = RetentionDays, client_id = ClientIdOverride,
-                    known_rewards = Rewards.Known.ToList(), queues = Rewards.Queues.ToList() };
+                    known_rewards = Rewards.Known.ToList(), queues = Rewards.Queues.ToList(), show_total = Rewards.ShowTotal };
 
                 string json = JsonSerializer.Serialize(config, JsonContext.PluginConfig);
                 AtomicFile.WriteAllText(configPath, json, Encoding.UTF8);

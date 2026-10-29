@@ -108,7 +108,7 @@ namespace RewardQueue.Tests
         }
 
         [Fact]
-        public void WithTracked_GoesToTheFirstQueueAndMovesRewardOutOfOthers()
+        public void WithTracked_NewRewardGoesToTheFirstQueue_AlreadyTrackedStaysWhereItIs()
         {
             var settings = RewardSettings.FromConfig(null, new[]
             {
@@ -116,10 +116,10 @@ namespace RewardQueue.Tests
                 new QueueConfig { id = "second", reward_ids = new List<string> { "a" } }
             });
 
-            settings = settings.WithTracked("a", true);
+            settings = settings.WithTracked("a", true).WithTracked("b", true);
 
-            Assert.Equal("first", settings.QueueFor("a"));
-            Assert.Empty(settings.Queues[1].reward_ids);
+            Assert.Equal("second", settings.QueueFor("a"));
+            Assert.Equal("first", settings.QueueFor("b"));
         }
 
         [Fact]
