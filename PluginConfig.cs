@@ -16,6 +16,25 @@ namespace RewardQueue
         public int retention_days { get; set; } = QueueState.DefaultRetentionDays;
         // Свой Client ID приложения Twitch вместо встроенного (для форка или на случай блокировки приложения). Пусто: встроенный
         public string client_id { get; set; } = "";
+        // Награды канала, полученные в последний раз кнопкой «Обновить список» (чтобы окно показывало список без сети)
+        public List<RewardInfo> known_rewards { get; set; } = new List<RewardInfo>();
+        // Очереди и награды, заказы которых в них попадают. Пока очередь одна, но формат рассчитан на несколько
+        public List<QueueConfig> queues { get; set; } = new List<QueueConfig>();
+    }
+
+    // Награда канала Twitch: id не меняется при переименовании, название только для показа
+    public class RewardInfo
+    {
+        public string id { get; set; } = "";
+        public string title { get; set; } = "";
+    }
+
+    public class QueueConfig
+    {
+        public string id { get; set; } = QueueState.MainQueueId;
+        public string name { get; set; } = "";
+        // id наград, заказы которых попадают в эту очередь
+        public List<string> reward_ids { get; set; } = new List<string>();
     }
 
     // Source Generator для NativeAOT (убирает требование рефлексии)

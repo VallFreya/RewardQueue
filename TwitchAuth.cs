@@ -65,6 +65,9 @@ namespace RewardQueue
             _http.Timeout = TimeSpan.FromSeconds(15);
         }
 
+        /// <summary>Client ID, под которым выданы токены (нужен в заголовке запросов к API Twitch)</summary>
+        public string ClientId => _clientId;
+
         public AuthSnapshot Snapshot
         {
             get { lock (_lock) return _snapshot; }
