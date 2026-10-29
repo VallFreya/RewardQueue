@@ -8,6 +8,10 @@ namespace RewardQueue
         public int version { get; set; } = 1;
         // Тема окна настроек: "dark" (по умолчанию) или "light"
         public string theme { get; set; } = "dark";
+        // Порт локального сервера на 127.0.0.1. Значение вне допустимых границ заменяется на значение по умолчанию
+        public int port { get; set; } = ServerGuard.DefaultPort;
+        // Ключ в адресах страниц. Создаётся при первом запуске и не меняется, чтобы док не приходилось добавлять заново
+        public string access_key { get; set; } = "";
     }
 
     // Source Generator для NativeAOT (убирает требование рефлексии)

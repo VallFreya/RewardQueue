@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Очередь наград: проверка источника</title>
+<style>
+  html, body { margin: 0; background: transparent; }
+  body { padding: 12px; font: 600 28px/1.3 "Segoe UI", sans-serif; color: #fff; text-shadow: 0 1px 4px #000; }
+  .small { font-size: 18px; font-weight: 400; }
+</style>
+</head>
+<body>
+<div>Очередь наград: проверка</div>
+<div class="small">Связь: <span id="state">нет</span> · время <span id="time">—</span></div>
+<div>Счётчик: <span id="counter">—</span></div>
+<script>
+  const key = new URLSearchParams(location.search).get("key") || "";
+  const stateEl = document.getElementById("state");
+  const timeEl = document.getElementById("time");
+  const counterEl = document.getElementById("counter");
+
+  const source = new EventSource("/events?key=" + encodeURIComponent(key));
+  source.onopen = () => { stateEl.textContent = "есть"; };
+  source.onerror = () => { stateEl.textContent = "нет"; };
+  source.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "tick") timeEl.textContent = msg.time;
+    if (msg.type === "counter") counterEl.textContent = msg.value;
+  };
+</script>
+</body>
+</html>

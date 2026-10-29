@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Очередь наград: проверка дока</title>
+<style>
+  body { margin: 0; padding: 16px; font: 15px/1.5 "Segoe UI", sans-serif; background: #1f1e25; color: #e6e5ea; }
+  h1 { font-size: 16px; margin: 0 0 12px; }
+  .row { margin: 8px 0; }
+  .muted { color: #9a98a6; }
+  .ok { color: #7bd88f; }
+  .bad { color: #ff7b7b; }
+  button { font: inherit; padding: 6px 14px; border: 1px solid #4b4a57; border-radius: 4px; background: #2c2b35; color: inherit; cursor: pointer; }
+  button:hover { background: #383743; }
+  .counter { font-size: 28px; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>Проверка дока</h1>
+<div class="row">Связь с плагином: <span id="state" class="bad">нет</span></div>
+<div class="row">Время на сервере: <span id="time" class="muted">—</span></div>
+<div class="row">Счётчик: <span id="counter" class="counter">—</span></div>
+<div class="row"><button id="bump">+1 (команда плагину)</button></div>
+<div class="row muted">Если счётчик меняется и на странице источника для трансляции, всё работает.</div>
+<script>
+  const key = new URLSearchParams(location.search).get("key") || "";
+  const stateEl = document.getElementById("state");
+  const timeEl = document.getElementById("time");
+  const counterEl = document.getElementById("counter");
+
+  const source = new EventSource("/events?key=" + encodeURIComponent(key));
+  source.onopen = () => { stateEl.textContent = "есть"; stateEl.className = "ok"; };
+  source.onerror = () => { stateEl.textContent = "нет, переподключаюсь…"; stateEl.className = "bad"; };
+  source.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "tick") timeEl.textContent = msg.time;
+    if (msg.type === "counter") counterEl.textContent = msg.value;
+  };
+
+  document.getElementById("bump").onclick = () =>
+    fetch("/api/bump?key=" + encodeURIComponent(key), { method: "POST" });
+</script>
+</body>
+</html>

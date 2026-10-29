@@ -4,12 +4,14 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Windows.Forms;
 
 namespace RewardQueue
 {
     public static class Plugin
     {
         public static IntPtr ModuleContext { get; private set; }
+        private static readonly ObsFrontendCb MenuCallbackDelegate = OnMenuClicked;
 
         private static readonly string LogFilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -29,7 +31,13 @@ namespace RewardQueue
 
         /// <summary>Тема окна настроек: тёмная по умолчанию, выбор хранится в config.json</summary>
         public static bool ThemeDark { get; private set; } = true;
+
+        /// <summary>Порт локального сервера и ключ в адресах страниц (см. ServerGuard)</summary>
+        public static int Port { get; private set; } = ServerGuard.DefaultPort;
+        public static string AccessKey { get; private set; } = "";
+
         private static IntPtr _moduleName = IntPtr.Zero;
+        private static int _settingsOpen;
 
         public static void LogInfo(string msg) => WriteLog("INFO", msg);
         public static void LogWarn(string msg) => WriteLog("WARN", msg);
@@ -59,6 +67,16 @@ namespace RewardQueue
 
         [DllImport("obs", CallingConvention = CallingConvention.Cdecl)]
         private static extern void bfree(IntPtr ptr);
+
+        [DllImport("obs-frontend-api", CallingConvention = CallingConvention.Cdecl)]
+        private static extern void obs_frontend_add_tools_menu_item(
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
+            ObsFrontendCb callback,
+            IntPtr privateData
+        );
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void ObsFrontendCb(IntPtr privateData);
 
         // --- Module Exports ---
         [UnmanagedCallersOnly(EntryPoint = "obs_module_set_pointer", CallConvs = new[] { typeof(CallConvCdecl) })]
@@ -94,11 +112,34 @@ namespace RewardQueue
 
             try
             {
+                obs_frontend_add_tools_menu_item(Loc.PluginName, MenuCallbackDelegate, IntPtr.Zero);
+                LogInfo("Tools menu item registered.");
+            }
+            catch (Exception ex)
+            {
+                LogError($"Failed to register menu item: {ex.Message}");
+            }
+
+            // Раздельно: сбой чтения настроек не должен лишать плагин сервера
+            try
+            {
                 LoadConfig();
+                EnsureAccessKey();
             }
             catch (Exception ex)
             {
                 LogError($"Failed to load the config: {ex.Message}");
+            }
+
+            try
+            {
+                LocalServer.StartCurrent(Port, AccessKey);
+                // Пробное подключение к EventSub: результат в журнале и в окне настроек (временно, пока нет настоящего входа)
+                _ = Task.Run(EventSubProbe.RunAsync);
+            }
+            catch (Exception ex)
+            {
+                LogError($"Failed to start the local server: {ex.Message}");
             }
 
             return true;
@@ -108,6 +149,16 @@ namespace RewardQueue
         public static void ObsModuleUnload()
         {
             LogInfo("=== Plugin ObsModuleUnload ===");
+            try
+            {
+                CloseSettingsWindow();
+                LocalServer.StopCurrent();
+            }
+            catch (Exception ex)
+            {
+                // исключение из экспортируемого метода уронило бы OBS при выходе
+                LogError($"Error during unload: {ex.Message}");
+            }
         }
 
         /// <summary>Путь к config.json вместо выданного OBS (для проверок вне OBS)</summary>
@@ -193,6 +244,8 @@ namespace RewardQueue
                 }
 
                 ThemeDark = !string.Equals(config!.theme, "light", StringComparison.OrdinalIgnoreCase);
+                Port = ServerGuard.ClampPort(config.port);
+                AccessKey = ServerGuard.IsValidKey(config.access_key) ? config.access_key : "";
                 LogInfo($"Loaded config from '{configPath}'");
             }
             catch (Exception ex)
@@ -233,6 +286,14 @@ namespace RewardQueue
             }
         }
 
+        /// <summary>Ключ создаётся один раз и сохраняется: адреса в доке и источниках OBS должны переживать перезапуск</summary>
+        internal static void EnsureAccessKey()
+        {
+            if (ServerGuard.IsValidKey(AccessKey)) return;
+            AccessKey = ServerGuard.NewKey();
+            WriteConfig();
+        }
+
         private static bool WriteConfig()
         {
             string configPath = "";
@@ -240,7 +301,7 @@ namespace RewardQueue
             try
             {
                 configPath = GetConfigFilePath();
-                var config = new PluginConfig { theme = ThemeDark ? "dark" : "light" };
+                var config = new PluginConfig { theme = ThemeDark ? "dark" : "light", port = Port, access_key = AccessKey };
 
                 string json = JsonSerializer.Serialize(config, JsonContext.PluginConfig);
                 AtomicFile.WriteAllText(configPath, json, Encoding.UTF8);
@@ -260,6 +321,68 @@ namespace RewardQueue
         {
             ThemeDark = dark;
             WriteConfig();
+        }
+
+        private static void OnMenuClicked(IntPtr privateData)
+        {
+            // второе окно настроек не открываем
+            if (Interlocked.CompareExchange(ref _settingsOpen, 1, 0) != 0) return;
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    // Исключение в обработчике события окна иначе открыло бы системное окно ошибки .NET поверх OBS.
+                    // Вместо этого пишем в журнал, и окно продолжает работать
+                    Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException, threadScope: true);
+                    if (Interlocked.Exchange(ref _threadExceptionHooked, 1) == 0)
+                    {
+                        Application.ThreadException += (s, e) => LogError($"Unhandled exception in the settings window: {e.Exception}");
+                    }
+
+                    using var form = new SettingsForm();
+                    _settingsForm = form;
+                    form.ShowDialog();
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Settings window failed: {ex}");
+                }
+                finally
+                {
+                    _settingsForm = null;
+                    Interlocked.Exchange(ref _settingsOpen, 0);
+                }
+            });
+            thread.IsBackground = true; // окно не должно удерживать процесс OBS при закрытии
+            thread.SetApartmentState(ApartmentState.STA);
+            _settingsThread = thread;
+            thread.Start();
+        }
+
+        private static int _threadExceptionHooked;
+        private static volatile SettingsForm? _settingsForm;
+        private static Thread? _settingsThread;
+
+        /// <summary>
+        /// Закрывает окно настроек, если оно открыто. Вызывается при выгрузке плагина: окно живёт в своём потоке
+        /// и иначе продолжало бы работать с кодом, который OBS уже выгружает
+        /// </summary>
+        private static void CloseSettingsWindow()
+        {
+            var form = _settingsForm;
+            var thread = _settingsThread;
+            if (form == null || thread == null || !thread.IsAlive) return;
+
+            try
+            {
+                if (form.IsHandleCreated) form.BeginInvoke(new Action(form.Close));
+                thread.Join(3000);
+            }
+            catch (Exception ex)
+            {
+                LogError($"Failed to close the settings window: {ex.Message}");
+            }
         }
 
         // Журнал растёт, пока плагин жив; при загрузке слишком большой файл откладывается в сторону

@@ -18,6 +18,11 @@
 		<EnableWindowsTargeting>true</EnableWindowsTargeting>
 	</PropertyGroup>
 
+	<!-- Веб-страницы очереди встроены в DLL и отдаются локальным сервером -->
+	<ItemGroup>
+		<EmbeddedResource Include="web\*.html" LogicalName="web/%(Filename)%(Extension)" />
+	</ItemGroup>
+
 	<!-- Проект с проверками лежит внутри папки плагина, но в DLL плагина попадать не должен -->
 	<ItemGroup>
 		<Compile Remove="tests\**" />
