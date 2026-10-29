@@ -24,6 +24,28 @@ namespace RewardQueue
         private Panel _bottomBar = null!;
         private Label _bottomLabel = null!;
 
+        // Блок «Очереди»: правки полей копятся и записываются после паузы, структурные изменения (добавить, удалить, перенести) сразу
+        private readonly List<QueuePanel> _queuePanels = new List<QueuePanel>();
+        private NumberStepper _showTotal = null!;
+        private readonly List<Func<RewardSettings, RewardSettings>> _pendingEdits = new List<Func<RewardSettings, RewardSettings>>();
+        private readonly System.Windows.Forms.Timer _editTimer = new System.Windows.Forms.Timer { Interval = 500 };
+
+        // Перетаскивание мышью (без OLE): наград между очередями и самих очередей
+        internal enum DragKind { None, Reward, Queue }
+        private DragKind _dragKind;
+        private string _dragId = "";
+        private string _dragSourceQueue = "";
+        private Label? _ghost;
+        private QueuePanel? _dragHot;
+        private int _dragInsertIndex = -1;
+        private Panel? _insertLine;
+        private Control? _armedControl;
+        private DragKind _armedKind;
+        private string _armedId = "";
+        private string _armedText = "";
+        private Point _armedAt;
+        private readonly System.Windows.Forms.Timer _dragScrollTimer = new System.Windows.Forms.Timer { Interval = 40 };
+
         // Подпись внизу: обычный текст → «Сохраняю…» → «Настройки сохранены» (3 секунды) → обычный текст
         private enum SaveHint { Idle, Saving, Saved, Failed }
         private readonly System.Windows.Forms.Timer _hintTimer = new System.Windows.Forms.Timer();
@@ -73,6 +95,8 @@ namespace RewardQueue
 
             // состояние меняется редко, полсекунды хватает
             _hintTimer.Tick += (s, e) => OnHintTimer();
+            _editTimer.Tick += (s, e) => FlushEdits();
+            _dragScrollTimer.Tick += (s, e) => AutoScrollWhileDragging();
             _liveTimer = new System.Windows.Forms.Timer { Interval = 500 };
             _liveTimer.Tick += (s, e) =>
             {
@@ -157,6 +181,13 @@ namespace RewardQueue
             if (Plugin.Rewards.Known.Count == 0) AddText(rewards, Loc.RewardsEmpty, 12, muted: true);
             _rewardsTracked = AddText(rewards, "", 12, muted: true);
 
+            _queuePanels.Clear();
+            _insertLine = null;
+            var queues = AddCard(Loc.QueuesTitle);
+            AddText(queues, Loc.QueuesIntro, 0, muted: true);
+            AddQueuesEditor(queues, 12);
+            AddShowTotal(queues, 14);
+
             var addresses = AddCard(Loc.AddressesTitle);
             AddText(addresses, Loc.AddressesIntro, 0, muted: true);
             AddText(addresses, Loc.DockLabel, 16, bold: true);
@@ -210,8 +241,13 @@ namespace RewardQueue
             RebuildUi();
         }
 
-        private void RebuildUi()
+        internal void RebuildUi()
         {
+            // введённое в поля не должно потеряться при пересборке
+            FlushEdits();
+            CancelDrag();
+            int scroll = _content == null ? 0 : -_content.AutoScrollPosition.Y;
+
             _liveTimer.Stop();
             SuspendLayout();
             var old = new List<Control>();
@@ -222,6 +258,7 @@ namespace RewardQueue
 
             BuildUi();
             ResumeLayout(true);
+            if (scroll > 0) _content.AutoScrollPosition = new Point(0, scroll);
 
             if (IsHandleCreated) Ui.ApplyWindowChrome(Handle);
             Invalidate(true);
@@ -455,6 +492,322 @@ namespace RewardQueue
                 button.SetBounds(Ui.Px(CardPad) + width - buttonWidth, top, buttonWidth, height);
                 return top + height;
             });
+        }
+
+        // ---- очереди ----
+
+        private string RewardTitle(string id)
+        {
+            var known = Plugin.Rewards.Known.FirstOrDefault(r => r.id == id);
+            return known != null && known.title.Length > 0 ? known.title : Loc.RewardMissing(id);
+        }
+
+        // Запоминает правку поля и записывает её после короткой паузы (чтобы не писать файл на каждую букву)
+        private void ScheduleEdit(Func<RewardSettings, RewardSettings> change)
+        {
+            _pendingEdits.Add(change);
+            _editTimer.Stop();
+            _editTimer.Start();
+            ShowSavingNow();
+        }
+
+        // Записывает накопленные правки полей. Вызывается по паузе, перед структурным изменением и при закрытии окна
+        internal void FlushEdits()
+        {
+            _editTimer.Stop();
+            if (_pendingEdits.Count == 0) return;
+
+            var edits = _pendingEdits.ToArray();
+            _pendingEdits.Clear();
+            ShowSaving(Plugin.UpdateRewards(r => edits.Aggregate(r, (settings, edit) => edit(settings))));
+        }
+
+        // Правка принята, но ещё не записана: подпись внизу показывает «Сохраняю…» до записи
+        private void ShowSavingNow()
+        {
+            _hintTimer.Stop();
+            SetHint(SaveHint.Saving);
+        }
+
+        // Структурное изменение (добавить, удалить, перенести): записывается сразу, окно пересобирается под новый состав
+        private void ApplyStructural(Func<RewardSettings, RewardSettings> change)
+        {
+            FlushEdits();
+            ShowSaving(Plugin.UpdateRewards(change));
+            // пересборка уничтожает элементы, из чьих обработчиков мы вызваны: делаем её после них
+            BeginInvoke(new Action(RebuildUi));
+        }
+
+        // Блок очередей: кнопка «Добавить очередь» справа вверху и панели очередей одна под другой
+        private void AddQueuesEditor(Card card, int gap)
+        {
+            var add = new ThemedButton { Text = Loc.AddQueue, Glyph = Ui.GlyphAdd, Tone = ButtonTone.Success };
+            add.Click += (s, e) => ApplyStructural(r => r.AddQueue());
+            card.Panel.Controls.Add(add);
+            card.Add((top, width) =>
+            {
+                top += Ui.Px(gap);
+                int buttonWidth = Math.Min(width, Math.Max(Ui.Px(150), TextRenderer.MeasureText(add.Text, add.Font).Width + Ui.Px(56)));
+                add.SetBounds(Ui.Px(CardPad) + width - buttonWidth, top, buttonWidth, Ui.Px(32));
+                return top + Ui.Px(32);
+            });
+
+            var settings = Plugin.Rewards;
+            foreach (var queue in settings.Queues)
+            {
+                var rewards = queue.reward_ids.Select(id => (id, RewardTitle(id))).ToList();
+                var panel = new QueuePanel(queue, rewards, canDelete: settings.Queues.Count > 1, _tip);
+                string queueId = queue.id;
+                panel.NameEdited += name => ScheduleEdit(r => r.RenameQueue(queueId, name));
+                panel.LimitEdited += limit => ScheduleEdit(r => r.SetShowLimit(queueId, limit));
+                panel.DeleteClicked += () => ApplyStructural(r => r.RemoveQueue(queueId));
+                AttachDrag(panel.Handle, DragKind.Queue, queueId, () => QueueLabel(queueId));
+                foreach (var chip in panel.Chips) AttachDrag(chip, DragKind.Reward, chip.RewardId, () => chip.Text);
+
+                _queuePanels.Add(panel);
+                card.Panel.Controls.Add(panel);
+                card.Add((top, width) =>
+                {
+                    top += Ui.Px(8);
+                    int height = panel.LayoutFor(width);
+                    panel.Location = new Point(Ui.Px(CardPad), top);
+                    return top + height;
+                });
+            }
+        }
+
+        // Общий лимит записей на трансляции по всем очередям: подпись, счётчик и пояснение про 0
+        private void AddShowTotal(Card card, int gap)
+        {
+            var label = new Label
+            {
+                Text = Loc.ShowTotal,
+                AutoSize = false,
+                UseMnemonic = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = ObsTheme.Text,
+                BackColor = ObsTheme.BaseBg,
+                Font = Ui.Font(FontStyle.Bold)
+            };
+            _showTotal = new NumberStepper { ZeroPad = false, Minimum = 0, Maximum = RewardSettings.MaxShowLimit, Value = Plugin.Rewards.ShowTotal };
+            _showTotal.ValueChanged += (s, e) => ScheduleEdit(r => r.WithShowTotal(_showTotal.Value));
+            card.Panel.Controls.Add(label);
+            card.Panel.Controls.Add(_showTotal);
+            card.Add((top, width) =>
+            {
+                top += Ui.Px(gap);
+                int labelWidth = TextRenderer.MeasureText(label.Text, label.Font).Width + Ui.Px(12);
+                label.SetBounds(Ui.Px(CardPad), top, labelWidth, Ui.Px(32));
+                _showTotal.SetBounds(Ui.Px(CardPad) + labelWidth + Ui.Px(8), top, Ui.Px(110), Ui.Px(32));
+                return top + Ui.Px(32);
+            });
+            AddText(card, Loc.ShowTotalHint, 6, muted: true);
+        }
+
+        private string QueueLabel(string queueId)
+        {
+            var queues = Plugin.Rewards.Queues;
+            int index = queues.ToList().FindIndex(q => q.id == queueId);
+            string name = index >= 0 ? queues[index].name : "";
+            return name.Length > 0 ? name : Loc.QueueFallbackName(index + 1);
+        }
+
+        // ---- перетаскивание ----
+
+        // Элемент можно «взять» левой кнопкой: после небольшого сдвига начинается перетаскивание, дальше его ведёт мышь
+        // (элемент держит захват мыши до отпускания кнопки)
+        private void AttachDrag(Control control, DragKind kind, string id, Func<string> text)
+        {
+            control.MouseDown += (s, e) =>
+            {
+                if (e.Button != MouseButtons.Left) return;
+                _armedControl = control;
+                _armedKind = kind;
+                _armedId = id;
+                _armedText = text();
+                _armedAt = Cursor.Position;
+            };
+            control.MouseMove += (s, e) =>
+            {
+                if (_armedControl != control) return;
+                var now = Cursor.Position;
+                if (_dragKind == DragKind.None)
+                {
+                    if (Math.Abs(now.X - _armedAt.X) < Ui.Px(4) && Math.Abs(now.Y - _armedAt.Y) < Ui.Px(4)) return;
+                    BeginDrag(_armedKind, _armedId, _armedText);
+                }
+                MoveDrag(now);
+            };
+            control.MouseUp += (s, e) =>
+            {
+                if (_armedControl != control) return;
+                _armedControl = null;
+                if (_dragKind != DragKind.None) EndDrag(Cursor.Position, apply: true);
+            };
+        }
+
+        internal void BeginDrag(DragKind kind, string id, string text)
+        {
+            ResetDragState();
+            _dragKind = kind;
+            _dragId = id;
+            _dragSourceQueue = kind == DragKind.Reward
+                ? _queuePanels.FirstOrDefault(p => p.Chips.Any(c => c.RewardId == id))?.QueueId ?? ""
+                : id;
+
+            _ghost = new Label
+            {
+                Text = text,
+                AutoSize = false,
+                UseMnemonic = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = ObsTheme.Text,
+                BackColor = ObsTheme.Primary,
+                Font = Ui.Font(FontStyle.Bold),
+                Enabled = false
+            };
+            var size = TextRenderer.MeasureText(text, _ghost.Font);
+            _ghost.Size = new Size(Math.Min(Ui.Px(320), size.Width + Ui.Px(28)), Ui.Px(30));
+            Controls.Add(_ghost);
+            _ghost.BringToFront();
+            _dragScrollTimer.Start();
+        }
+
+        // Ведёт «призрак» за мышью и показывает, куда упадёт перетаскиваемое
+        internal void MoveDrag(Point screen)
+        {
+            if (_dragKind == DragKind.None) return;
+
+            if (_ghost != null)
+            {
+                var at = PointToClient(screen);
+                _ghost.Location = new Point(at.X + Ui.Px(14), at.Y + Ui.Px(10));
+                _ghost.BringToFront();
+            }
+
+            if (_dragKind == DragKind.Reward)
+            {
+                // награду можно бросить на любую очередь, кроме той, где она уже лежит
+                var hot = _queuePanels.FirstOrDefault(p => p.RectangleToScreen(p.ClientRectangle).Contains(screen) && p.QueueId != _dragSourceQueue);
+                if (_dragHot != hot)
+                {
+                    if (_dragHot != null) _dragHot.DropHot = false;
+                    _dragHot = hot;
+                    if (hot != null) hot.DropHot = true;
+                }
+            }
+            else
+            {
+                UpdateInsertLine(screen);
+            }
+        }
+
+        // Для очереди: новое место определяется тем, сколько остальных очередей выше курсора; место показывает линия между ними
+        private void UpdateInsertLine(Point screen)
+        {
+            var others = _queuePanels.Where(p => p.QueueId != _dragId).ToList();
+            int index = others.Count(p =>
+            {
+                var rect = p.RectangleToScreen(p.ClientRectangle);
+                return rect.Top + rect.Height / 2 < screen.Y;
+            });
+
+            int currentIndex = _queuePanels.FindIndex(p => p.QueueId == _dragId);
+            _dragInsertIndex = index == currentIndex ? -1 : index;
+
+            _insertLine ??= new Panel { Height = Ui.Px(4), BackColor = ObsTheme.FocusRing };
+            var host = others.Count > 0 ? others[0].Parent : null;
+            if (_dragInsertIndex < 0 || host == null)
+            {
+                _insertLine.Visible = false;
+                return;
+            }
+
+            if (_insertLine.Parent != host) host.Controls.Add(_insertLine);
+            int y = index == 0 ? others[0].Top - Ui.Px(6) : others[index - 1].Bottom + Ui.Px(2);
+            _insertLine.SetBounds(others[0].Left, y, others[0].Width, Ui.Px(4));
+            _insertLine.Visible = true;
+            _insertLine.BringToFront();
+        }
+
+        internal void EndDrag(Point screen, bool apply)
+        {
+            if (_dragKind == DragKind.None) return;
+
+            MoveDrag(screen);
+            var kind = _dragKind;
+            string id = _dragId;
+            var hot = _dragHot;
+            int insert = _dragInsertIndex;
+            CancelDrag();
+            if (!apply) return;
+
+            if (kind == DragKind.Reward && hot != null)
+            {
+                string target = hot.QueueId;
+                ApplyStructural(r => r.MoveReward(id, target));
+            }
+            else if (kind == DragKind.Queue && insert >= 0)
+            {
+                ApplyStructural(r => r.MoveQueue(id, insert));
+            }
+        }
+
+        internal void CancelDrag()
+        {
+            ResetDragState();
+            _armedControl = null;
+        }
+
+        // Убирает «призрак», подсветку и линию вставки. «Взятый» мышью элемент не трогает: перетаскивание ведёт именно он
+        private void ResetDragState()
+        {
+            _dragScrollTimer.Stop();
+            _dragKind = DragKind.None;
+            _dragId = "";
+            _dragInsertIndex = -1;
+            if (_dragHot != null) _dragHot.DropHot = false;
+            _dragHot = null;
+            if (_insertLine != null) _insertLine.Visible = false;
+            if (_ghost != null)
+            {
+                Controls.Remove(_ghost);
+                _ghost.Dispose();
+                _ghost = null;
+            }
+        }
+
+        // У верхнего и нижнего края списка перетаскивание прокручивает его
+        private void AutoScrollWhileDragging()
+        {
+            if (_dragKind == DragKind.None || _content == null) return;
+
+            var at = _content.PointToClient(Cursor.Position);
+            int edge = Ui.Px(36), step = Ui.Px(22);
+            int delta = at.Y < edge ? -step : at.Y > _content.Height - edge ? step : 0;
+            if (delta == 0) return;
+
+            int current = -_content.AutoScrollPosition.Y;
+            _content.AutoScrollPosition = new Point(0, Math.Max(0, current + delta));
+            MoveDrag(Cursor.Position);
+        }
+
+        // Esc отменяет перетаскивание
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape && _dragKind != DragKind.None)
+            {
+                CancelDrag();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            // правки, сделанные меньше чем за паузу до закрытия, не должны потеряться
+            FlushEdits();
+            base.OnFormClosing(e);
         }
 
         // ---- награды ----
@@ -779,6 +1132,8 @@ namespace RewardQueue
             {
                 _liveTimer.Dispose();
                 _hintTimer.Dispose();
+                _editTimer.Dispose();
+                _dragScrollTimer.Dispose();
                 _tip.Dispose();
             }
             base.Dispose(disposing);

@@ -84,7 +84,10 @@ namespace RewardQueue.Tests
                         new RewardInfo { id = "a", title = "Заказ техники" },
                         new RewardInfo { id = "b", title = "Заказ музыки с очень длинным названием, которое не помещается в строку окна настроек" },
                         new RewardInfo { id = "c", title = "x" }
-                    }).WithTracked("a", true));
+                    }).WithTracked("a", true).WithTracked("b", true).AddQueue());
+                    // вторая очередь с длинным названием и наградой, лимиты заданы
+                    string second = Plugin.Rewards.Queues[1].id;
+                    Plugin.UpdateRewards(r => r.MoveReward("b", second).RenameQueue(second, "Очень длинное название очереди, которое не помещается в одну строку окна").SetShowLimit(second, 5).WithShowTotal(12));
                     auth.SetSnapshotForPreview(Snapshot(authState));
                     TwitchAuth.Current = auth;
 
@@ -111,7 +114,7 @@ namespace RewardQueue.Tests
                         Assert.True(bottom.Height >= needed, $"подпись внизу обрезана: {w}x{h} ru={russian} полоса {bottom.Height}, нужно {needed}");
 
                         var cards = Cards(form).ToList();
-                        Assert.Equal(4, cards.Count);
+                        Assert.Equal(5, cards.Count);
                         foreach (var card in cards)
                         {
                             string where = $"{w}x{h} ru={russian} dark={dark} auth={authState} «{card.Text}»";

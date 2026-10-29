@@ -24,7 +24,7 @@ namespace UiPreview
             Plugin.LogEnabled = false;
             Loc.LanguageOverride = Environment.GetEnvironmentVariable("UITEST_LANG") != "en";
             Plugin.EnsureAccessKey();
-            LocalServer.StartCurrent(47999, Plugin.AccessKey);
+            LocalServer.StartCurrent(47999, Plugin.AccessKey, new QueueApi());
             // награды для снимка: короткие и длинные названия, часть отмечена; UITEST_REWARDS=0 показывает пустой список
             if (Environment.GetEnvironmentVariable("UITEST_REWARDS") != "0")
             {
@@ -33,7 +33,18 @@ namespace UiPreview
                     new RewardInfo { id = "a", title = "Заказ техники" },
                     new RewardInfo { id = "b", title = "Заказ музыки" },
                     new RewardInfo { id = "c", title = "Очень длинное название награды, которое придётся обрезать многоточием в конце строки" }
-                }).WithTracked("a", true));
+                }).WithTracked("a", true).WithTracked("b", true).WithTracked("c", true));
+
+                // UITEST_QUEUES=1: одна очередь; по умолчанию две, у второй название и лимит
+                if (Environment.GetEnvironmentVariable("UITEST_QUEUES") != "1")
+                {
+                    Plugin.UpdateRewards(r =>
+                    {
+                        var two = r.AddQueue();
+                        string second = two.Queues[1].id;
+                        return two.MoveReward("c", second).RenameQueue(second, "Музыка").SetShowLimit(second, 3);
+                    });
+                }
             }
             using var auth = new TwitchAuth(Path.Combine(tmp, "preview_auth.bin"));
             TwitchAuth.Current = auth;
@@ -48,6 +59,13 @@ namespace UiPreview
             form.Location = new Point(screen.WorkingArea.X + 100, screen.WorkingArea.Y + 60);
             form.Show();
             Pump(600);
+
+            if (args.Length > 1 && args[1] == "dragtest")
+            {
+                RunDragTest(form);
+                LocalServer.StopCurrent();
+                return;
+            }
 
             int n = 0;
             foreach (string scenario in args.Skip(1))
@@ -84,6 +102,61 @@ namespace UiPreview
             : parts.Contains("problem-in") ? new AuthSnapshot(AuthState.SignedIn, Login: "streamer", UserId: "1", Problem: AuthProblem.Offline)
             : parts.Contains("problem") ? new AuthSnapshot(Problem: AuthProblem.SessionExpired)
             : new AuthSnapshot();
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+        private const uint LeftDown = 0x0002, LeftUp = 0x0004;
+
+        private static IEnumerable<T> All<T>(Control root) where T : Control
+        {
+            foreach (Control child in root.Controls)
+            {
+                if (child is T match) yield return match;
+                foreach (var nested in All<T>(child)) yield return nested;
+            }
+        }
+
+        // Настоящие события мыши: взять награду «Заказ техники» (первая очередь) и бросить на вторую очередь, затем поменять очереди местами
+        private static void RunDragTest(SettingsForm form)
+        {
+            form.ClientSize = new Size(form.ClientSize.Width, (int)(1500 * form.DeviceDpi / 96f));
+            Pump(500);
+            form.Activate();
+            Pump(300);
+
+            var panels = All<QueuePanel>(form).OrderBy(p => p.Parent!.Top + p.Top).ToList();
+            var chip = panels[0].Chips.First();
+            string rewardId = chip.RewardId;
+            string secondQueue = panels[1].QueueId;
+            Console.WriteLine($"before: reward {rewardId} in {(Plugin.Rewards.QueueFor(rewardId) == Plugin.Rewards.FirstQueueId ? "first" : "other")} queue");
+
+            void Move(Point screen) { SetCursorPos(screen.X, screen.Y); Pump(60); }
+            Point Center(Control c) => c.PointToScreen(new Point(c.Width / 2, c.Height / 2));
+
+            // награда: нажать, сдвинуться (по шагам), отпустить над второй очередью
+            var from = Center(chip);
+            var to = Center(panels[1]);
+            Move(from);
+            mouse_event(LeftDown, 0, 0, 0, UIntPtr.Zero);
+            Pump(80);
+            for (int i = 1; i <= 10; i++) Move(new Point(from.X + (to.X - from.X) * i / 10, from.Y + (to.Y - from.Y) * i / 10));
+            mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero);
+            Pump(600);
+            Console.WriteLine($"after reward drag: reward {rewardId} in {(Plugin.Rewards.QueueFor(rewardId) == secondQueue ? "SECOND" : "not second")} queue");
+
+            // очередь: взять ручку второй очереди и поднять выше первой
+            panels = All<QueuePanel>(form).OrderBy(p => p.Parent!.Top + p.Top).ToList();
+            string movedId = panels[1].QueueId;
+            var handle = Center(panels[1].Handle);
+            var top = panels[0].PointToScreen(new Point(panels[0].Width / 2, 4));
+            Move(handle);
+            mouse_event(LeftDown, 0, 0, 0, UIntPtr.Zero);
+            Pump(80);
+            for (int i = 1; i <= 10; i++) Move(new Point(handle.X + (top.X - handle.X) * i / 10, handle.Y + (top.Y - handle.Y) * i / 10));
+            mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero);
+            Pump(600);
+            Console.WriteLine($"after queue drag: first queue is {(Plugin.Rewards.FirstQueueId == movedId ? "the dragged one" : "unchanged")}");
+        }
 
         private static void Pump(int ms)
         {

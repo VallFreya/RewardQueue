@@ -30,6 +30,10 @@ namespace RewardQueue
 
         public event EventHandler? ValueChanged;
 
+        /// <summary>Число с ведущим нулём («05»), как у часов и минут. Для обычных счётчиков (лимиты) выключено</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool ZeroPad { get; set; } = true;
+
         /// <summary>Пользователь закончил правку: сменил число стрелками, колёсиком или клавишей либо ушёл из поля</summary>
         public event EventHandler? Committed;
 
@@ -104,7 +108,7 @@ namespace RewardQueue
             _updatingText = true;
             try
             {
-                string text = _value.ToString("00", CultureInfo.InvariantCulture);
+                string text = _value.ToString(ZeroPad ? "00" : "0", CultureInfo.InvariantCulture);
                 if (_box.Text != text) _box.Text = text;
             }
             finally

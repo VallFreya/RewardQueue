@@ -119,6 +119,25 @@ namespace RewardQueue
             : $"Reward redemptions: no connection, retrying{(detail.Length > 0 ? " (" + detail + ")" : "")}";
         public static string QueueCount(int count) => Ru ? $"Записей в очереди: {count}" : $"Entries in the queue: {count}";
 
+        // Блок «Очереди»
+        public static string QueuesTitle => Ru ? "Очереди" : "Queues";
+        public static string QueuesIntro => Ru
+            ? "Отмеченная награда попадает в первую очередь. Награды можно перетаскивать мышью между очередями, а сами очереди менять местами за ручку слева. Название очереди необязательно: если оно есть, на трансляции оно пишется над списком."
+            : "A newly ticked reward goes to the first queue. Drag rewards between queues with the mouse and reorder the queues by the handle on the left. The queue name is optional: if it is set, it is shown above the list on stream.";
+        public static string AddQueue => Ru ? "Добавить очередь" : "Add queue";
+        public static string QueueNamePlaceholder => Ru ? "Название (необязательно)" : "Name (optional)";
+        public static string QueueShowLimit => Ru ? "Показывать до:" : "Show up to:";
+        public static string QueueLimitHint => Ru ? "записей. 0: без ограничения" : "entries. 0: no limit";
+        public static string QueueEmpty => Ru ? "Здесь пока нет наград: перетащите их сюда из другой очереди" : "No rewards here yet: drag them here from another queue";
+        public static string QueueDeleteTip => Ru ? "Удалить очередь: её награды перейдут в первую очередь" : "Delete the queue: its rewards move to the first queue";
+        public static string QueueDragTip => Ru ? "Перетащите, чтобы поменять очереди местами" : "Drag to reorder the queues";
+        public static string ShowTotal => Ru ? "Показывать всего записей:" : "Show entries in total:";
+        public static string ShowTotalHint => Ru
+            ? "Для всех очередей вместе. Можно указать 0 (по умолчанию): тогда число записей на трансляции никак не ограничивается."
+            : "For all queues together. You can set 0 (the default): then the number of entries on stream is not limited in any way.";
+        public static string QueueFallbackName(int number) => Ru ? $"Очередь {number}" : $"Queue {number}";
+        public static string RewardMissing(string id) => Ru ? $"(награда удалена на Twitch, {id})" : $"(reward removed on Twitch, {id})";
+
         // Блок «Адреса для OBS»
         public static string AddressesTitle => Ru ? "Адреса для OBS" : "Addresses for OBS";
         public static string AddressesIntro => Ru
