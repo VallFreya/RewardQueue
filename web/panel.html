@@ -74,13 +74,12 @@
   .gbody { overflow-y: auto; overscroll-behavior: contain; }
   .gbody.scroll { padding-right: 4px; }
 
-  /* закреплённая внизу полоса: свёрнута до одной строки, раскрытая закрывает часть очереди */
-  #addBar { flex: none; background: var(--base); border-top: 1px solid var(--border); max-height: 75%; overflow-y: auto; }
-  /* раскрытая форма обведена бледно-синей рамкой и приподнята тенью, чтобы не сливаться с очередью под ней */
-  #addBar.open { border: 2px solid var(--frame); border-bottom-width: 0; background: color-mix(in srgb, var(--frame) 9%, var(--base)); box-shadow: 0 -8px 14px -6px var(--lift); }
-  #addBar.open #addToggle:hover { background: color-mix(in srgb, var(--frame) 16%, var(--base)); }
+  /* закреплённая внизу полоса: свёрнута до одной строки, раскрытая закрывает часть очереди.
+     И свёрнутая, и раскрытая обведены бледно-синей рамкой с синеватым фоном и тенью сверху, чтобы не сливаться с очередью */
+  #addBar { flex: none; max-height: 75%; overflow-y: auto; border: 2px solid var(--frame); border-bottom-width: 0;
+    background: color-mix(in srgb, var(--frame) 9%, var(--base)); box-shadow: 0 -8px 14px -6px var(--lift); }
   #addToggle { display: flex; align-items: center; justify-content: space-between; width: 100%; background: transparent; border: 0; border-radius: 0; padding: 10px 12px; font-weight: 600; text-align: left; }
-  #addToggle:hover { background: var(--button-hover); }
+  #addToggle:hover { background: color-mix(in srgb, var(--frame) 16%, var(--base)); }
   form { padding: 0 12px 12px; display: grid; gap: 8px; }
   form[hidden] { display: none; }
   form label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 2px; }
