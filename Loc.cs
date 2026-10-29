@@ -43,6 +43,10 @@ namespace RewardQueue
         public static string Ok => Ru ? "ОК" : "OK";
         public static string Cancel => Ru ? "Отмена" : "Cancel";
 
+        public static string Theme => Ru ? "Тема:" : "Theme:";
+        public static string ThemeDarkName => Ru ? "Тёмная" : "Dark";
+        public static string ThemeLightName => Ru ? "Светлая" : "Light";
+
         // Блок «Адреса для OBS»
         public static string AddressesTitle => Ru ? "Адреса для OBS" : "Addresses for OBS";
         public static string AddressesIntro => Ru
