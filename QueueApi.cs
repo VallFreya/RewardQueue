@@ -11,6 +11,19 @@ namespace RewardQueue
         public List<QueueEntry> entries { get; set; } = new List<QueueEntry>();
         // Отслеживаемые награды: из них док предлагает выбрать название при ручном добавлении
         public List<RewardInfo> rewards { get; set; } = new List<RewardInfo>();
+        // Очереди по порядку: название (может быть пустым) и сколько записей каждой показывать на трансляции
+        public List<StateQueue> queues { get; set; } = new List<StateQueue>();
+        // Сколько записей всего показывать на трансляции; 0 без ограничения
+        public int show_total { get; set; }
+    }
+
+    public class StateQueue
+    {
+        public string id { get; set; } = "";
+        public string name { get; set; } = "";
+        public int show_limit { get; set; }
+        // награды очереди нужны доку для выбора при ручном добавлении
+        public List<string> reward_ids { get; set; } = new List<string>();
     }
 
     public class AddRequest
@@ -18,6 +31,10 @@ namespace RewardQueue
         public string title { get; set; } = "";
         public string user { get; set; } = "";
         public string input { get; set; } = "";
+        // Награда из списка отмеченных: по ней определяется очередь
+        public string reward_id { get; set; } = "";
+        // Очередь, если награда не из списка (своё название)
+        public string queue_id { get; set; } = "";
     }
 
     public class AddResponse
@@ -47,8 +64,11 @@ namespace RewardQueue
         /// <summary>«Вернуть в очередь»: пометка снимается. false, если такой записи нет</summary>
         bool Release(string id);
 
-        /// <summary>Ручное добавление. Возвращает id записи или null, если название пустое</summary>
-        string? AddManual(string title, string? user, string? input);
+        /// <summary>
+        /// Ручное добавление. Награда из списка (rewardId) определяет очередь сама, иначе берётся queueId, иначе первая очередь.
+        /// Возвращает id записи или null, если название пустое
+        /// </summary>
+        string? AddManual(string title, string? user, string? input, string? rewardId, string? queueId);
     }
 
     /// <summary>Настоящая реализация: очередь плагина и отмеченные награды</summary>
@@ -62,7 +82,14 @@ namespace RewardQueue
 
         public bool Release(string id) => QueueService.Current?.ReleaseWorking(id) ?? false;
 
-        public string? AddManual(string title, string? user, string? input) => QueueService.Current?.AddManual(title, user, input);
+        public string? AddManual(string title, string? user, string? input, string? rewardId, string? queueId)
+        {
+            var rewards = Plugin.Rewards;
+            string reward = (rewardId ?? "").Trim();
+            string? byReward = reward.Length > 0 ? rewards.QueueFor(reward) : null;
+            string queue = byReward ?? (rewards.Queue((queueId ?? "").Trim()) != null ? queueId!.Trim() : rewards.FirstQueueId);
+            return QueueService.Current?.AddManual(title, user, input, queue, byReward != null ? reward : "");
+        }
 
         /// <summary>Состояние для страниц: очередь и отмеченные награды</summary>
         public static string BuildStateJson(IReadOnlyList<QueueEntry> entries, RewardSettings rewards)
@@ -70,7 +97,9 @@ namespace RewardQueue
             var message = new StateMessage
             {
                 entries = entries.ToList(),
-                rewards = rewards.Known.Where(r => rewards.IsTracked(r.id)).ToList()
+                rewards = rewards.Known.Where(r => rewards.IsTracked(r.id)).ToList(),
+                queues = rewards.Queues.Select(q => new StateQueue { id = q.id, name = q.name, show_limit = q.show_limit, reward_ids = q.reward_ids.ToList() }).ToList(),
+                show_total = rewards.ShowTotal
             };
             return JsonSerializer.Serialize(message, WebJsonContext.Default.StateMessage);
         }

@@ -224,7 +224,7 @@ namespace RewardQueue
             }
 
             var add = QueueApi.ParseAddRequest(body);
-            string? id = add == null ? null : _api.AddManual(add.title, add.user, add.input);
+            string? id = add == null ? null : _api.AddManual(add.title, add.user, add.input, add.reward_id, add.queue_id);
             if (id == null)
             {
                 Finish(response, 400);

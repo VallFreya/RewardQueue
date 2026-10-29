@@ -20,8 +20,9 @@ namespace RewardQueue
         private readonly List<QueueEntry> _entries = new List<QueueEntry>();
 
         /// <summary>
-        /// Очередь из сохранённых записей. Порядок файла сохраняется как есть (запись, поднятая кнопкой «Делаю», остаётся первой),
-        /// повторы по id отбрасываются. Если «делаемых» записей несколько, остаётся первая из них, и она ставится на первое место
+        /// Очереди из сохранённых записей. Порядок файла сохраняется как есть (запись, поднятая кнопкой «Делаю», остаётся первой
+        /// в своей очереди), повторы по id отбрасываются. Если в одной очереди «делаемых» записей несколько, остаётся первая из них,
+        /// и она ставится на первое место этой очереди
         /// </summary>
         public QueueState(IEnumerable<QueueEntry>? initial = null)
         {
@@ -35,14 +36,17 @@ namespace RewardQueue
                 _entries.Add(clean);
             }
 
-            int working = _entries.FindIndex(e => e.in_progress);
-            foreach (var e in _entries) e.in_progress = false;
-            if (working >= 0)
+            foreach (string queueId in _entries.Select(e => e.queue_id).Distinct().ToList())
             {
+                int working = _entries.FindIndex(e => e.queue_id == queueId && e.in_progress);
+                foreach (var e in _entries.Where(e => e.queue_id == queueId)) e.in_progress = false;
+                if (working < 0) continue;
+
                 var current = _entries[working];
                 current.in_progress = true;
                 _entries.RemoveAt(working);
-                _entries.Insert(0, current);
+                int first = _entries.FindIndex(e => e.queue_id == queueId);
+                _entries.Insert(first >= 0 ? first : working, current);
             }
         }
 
@@ -51,7 +55,10 @@ namespace RewardQueue
             get { lock (_lock) return _entries.Count; }
         }
 
-        /// <summary>Копия очереди в порядке показа: кто заказал раньше, тот выше; «делаемая» запись первая</summary>
+        /// <summary>
+        /// Копия всех записей. Порядок внутри каждой очереди: кто заказал раньше, тот выше; «делаемая» запись первая в своей очереди.
+        /// Записи разных очередей идут вперемешку, страницы разбирают их по queue_id
+        /// </summary>
         public IReadOnlyList<QueueEntry> Snapshot()
         {
             lock (_lock) return _entries.Select(e => e.Clone()).ToList();
@@ -79,19 +86,60 @@ namespace RewardQueue
             }
         }
 
-        // После всех записей не позже этой: при одинаковом времени порядок добавления сохраняется.
-        // Перед «делаемой» первой записью новая не встаёт, даже если заказана раньше
+        // Запись встаёт после всех записей своей очереди, заказанных не позже неё: при одинаковом времени порядок добавления
+        // сохраняется. Перед «делаемой» первой записью очереди новая не встаёт, даже если заказана раньше
         private void InsertByTime(QueueEntry entry)
         {
-            int floor = _entries.Count > 0 && _entries[0].in_progress ? 1 : 0;
-            int index = _entries.Count;
-            while (index > floor && _entries[index - 1].redeemed_at > entry.redeemed_at) index--;
+            string queueId = entry.queue_id;
+            int first = _entries.FindIndex(e => e.queue_id == queueId);
+            if (first < 0)
+            {
+                _entries.Add(entry);
+                return;
+            }
+
+            int floor = _entries[first].in_progress ? first + 1 : first;
+            int index = floor;
+            for (int i = _entries.Count - 1; i >= floor; i--)
+            {
+                if (_entries[i].queue_id == queueId && _entries[i].redeemed_at <= entry.redeemed_at)
+                {
+                    index = i + 1;
+                    break;
+                }
+            }
             _entries.Insert(index, entry);
         }
 
         /// <summary>
-        /// Кнопка «Делаю»: запись поднимается на первое место и помечается «делаю сейчас», порядок остальных не меняется.
-        /// Прежняя «делаемая» запись остаётся на втором месте уже без пометки. found: запись есть;
+        /// Переносит записи по новому соответствию наград и очередей. mapping возвращает очередь для записи (по её награде)
+        /// или null, если запись остаётся где была; запись из несуществующей очереди уходит в fallbackQueueId.
+        /// Переехавшая запись теряет пометку «делаю» и встаёт в новой очереди по времени заказа. Возвращает, изменилось ли что-то
+        /// </summary>
+        public bool Reassign(Func<QueueEntry, string?> mapping, ICollection<string> queueIds, string fallbackQueueId)
+        {
+            lock (_lock)
+            {
+                bool changed = false;
+                foreach (var entry in _entries.ToList())
+                {
+                    string? target = mapping(entry);
+                    if (target == null || !queueIds.Contains(target)) target = queueIds.Contains(entry.queue_id) ? entry.queue_id : fallbackQueueId;
+                    if (target == entry.queue_id) continue;
+
+                    _entries.Remove(entry);
+                    entry.queue_id = target;
+                    entry.in_progress = false;
+                    InsertByTime(entry);
+                    changed = true;
+                }
+                return changed;
+            }
+        }
+
+        /// <summary>
+        /// Кнопка «Делаю»: запись поднимается на первое место своей очереди и помечается «делаю сейчас», порядок остальных
+        /// не меняется. Прежняя «делаемая» запись той же очереди остаётся на втором месте уже без пометки. found: запись есть;
         /// changed: что-то действительно изменилось (повторное нажатие ничего не меняет)
         /// </summary>
         public bool StartWorking(string id, out bool changed)
@@ -105,7 +153,7 @@ namespace RewardQueue
                 var target = _entries[index];
                 foreach (var other in _entries)
                 {
-                    if (other != target && other.in_progress)
+                    if (other != target && other.queue_id == target.queue_id && other.in_progress)
                     {
                         other.in_progress = false;
                         changed = true;
@@ -118,10 +166,11 @@ namespace RewardQueue
                     changed = true;
                 }
 
-                if (index != 0)
+                int first = _entries.FindIndex(e => e.queue_id == target.queue_id);
+                if (index != first)
                 {
                     _entries.RemoveAt(index);
-                    _entries.Insert(0, target);
+                    _entries.Insert(first, target);
                     changed = true;
                 }
                 return true;
@@ -186,11 +235,13 @@ namespace RewardQueue
         public static int ClampRetentionDays(int days) => days <= 0 ? DefaultRetentionDays : Math.Min(days, MaxRetentionDays);
 
         /// <summary>Запись, добавляемая вручную: свой GUID, время добавления, источник «manual»</summary>
-        public static QueueEntry NewManual(string rewardTitle, string? userName, string? userInput, DateTimeOffset now, string queueId = MainQueueId) => new QueueEntry
+        public static QueueEntry NewManual(string rewardTitle, string? userName, string? userInput, DateTimeOffset now,
+            string queueId = MainQueueId, string rewardId = "") => new QueueEntry
         {
             id = Guid.NewGuid().ToString("N"),
             source = QueueEntry.SourceManual,
             queue_id = queueId,
+            reward_id = rewardId,
             reward_title = rewardTitle,
             user_name = userName ?? "",
             user_input = userInput ?? "",

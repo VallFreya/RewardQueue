@@ -44,10 +44,13 @@ namespace RewardQueue
         /// <summary>Новый заказ Twitch. false, если это повтор уже известного заказа или запись пустая</summary>
         public bool Add(QueueEntry entry) => Mutate(() => _state.Add(entry));
 
-        /// <summary>Запись, добавленная вручную. Возвращает её id или null, если название пустое</summary>
-        public string? AddManual(string rewardTitle, string? userName, string? userInput)
+        /// <summary>
+        /// Запись, добавленная вручную, в указанную очередь (награда из списка определяет очередь сама, это решает вызывающий).
+        /// Возвращает её id или null, если название пустое
+        /// </summary>
+        public string? AddManual(string rewardTitle, string? userName, string? userInput, string queueId = QueueState.MainQueueId, string rewardId = "")
         {
-            var entry = QueueState.NewManual(rewardTitle, userName, userInput, _clock());
+            var entry = QueueState.NewManual(rewardTitle, userName, userInput, _clock(), queueId, rewardId);
             return Mutate(() => _state.Add(entry)) ? entry.id : null;
         }
 
@@ -74,6 +77,10 @@ namespace RewardQueue
             });
             return found;
         }
+
+        /// <summary>Награды переехали между очередями или очередь удалена: записи переносятся следом</summary>
+        public bool Reassign(Func<QueueEntry, string?> mapping, ICollection<string> queueIds, string fallbackQueueId) =>
+            Mutate(() => _state.Reassign(mapping, queueIds, fallbackQueueId));
 
         /// <summary>«Выполнено» или «Убрать»</summary>
         public bool Remove(string id) => Mutate(() => _state.Remove(id) != null);

@@ -171,6 +171,7 @@ namespace RewardQueue
         {
             QueueService.Current = new QueueService(Path.Combine(GetConfigDirectory(), QueueStore.FileName), () => DateTimeOffset.UtcNow, RetentionDays);
             LogInfo($"Queue restored: {QueueService.Current.Count} entries");
+            ApplyQueueMapping();   // записи из несуществующих очередей (конфиг правили вручную) уходят в первую
 
             // Любое изменение очереди или списка отмеченных наград сразу уходит на открытые страницы (док и оверлей)
             QueueService.Current.Changed += () => LocalServer.Current?.PushState();
@@ -464,6 +465,8 @@ namespace RewardQueue
                 written = WriteConfig();
             }
 
+            ApplyQueueMapping();
+
             try
             {
                 RewardsChanged?.Invoke();
@@ -473,6 +476,27 @@ namespace RewardQueue
                 LogError($"Rewards change handler failed: {ex.Message}");
             }
             return written;
+        }
+
+        /// <summary>
+        /// Приводит записи очереди в соответствие с настройками: награда переехала в другую очередь, и её записи едут следом;
+        /// записи удалённой очереди уходят в первую. Награда, с которой сняли галочку, свои записи не теряет
+        /// </summary>
+        internal static void ApplyQueueMapping()
+        {
+            var queue = QueueService.Current;
+            if (queue == null) return;
+
+            try
+            {
+                var rewards = Rewards;
+                var ids = rewards.Queues.Select(q => q.id).ToList();
+                queue.Reassign(e => e.reward_id.Length > 0 ? rewards.QueueFor(e.reward_id) : null, ids, rewards.FirstQueueId);
+            }
+            catch (Exception ex)
+            {
+                LogError($"Applying the queue settings to the entries failed: {ex.Message}");
+            }
         }
 
         /// <summary>Список отмеченных наград изменился (док предлагает их при ручном добавлении)</summary>

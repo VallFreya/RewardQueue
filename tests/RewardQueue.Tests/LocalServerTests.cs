@@ -13,6 +13,7 @@ namespace RewardQueue.Tests
         public List<string> Started { get; } = new List<string>();
         public List<string> Released { get; } = new List<string>();
         public List<(string Title, string? User, string? Input)> Added { get; } = new();
+        public List<(string? RewardId, string? QueueId)> AddedTo { get; } = new();
         public HashSet<string> KnownIds { get; } = new HashSet<string> { "known" };
 
         public string BuildState() => State;
@@ -35,10 +36,11 @@ namespace RewardQueue.Tests
             return KnownIds.Contains(id);
         }
 
-        public string? AddManual(string title, string? user, string? input)
+        public string? AddManual(string title, string? user, string? input, string? rewardId, string? queueId)
         {
             if (string.IsNullOrWhiteSpace(title)) return null;
             Added.Add((title, user, input));
+            AddedTo.Add((rewardId, queueId));
             return "manual-id";
         }
     }
@@ -164,6 +166,15 @@ namespace RewardQueue.Tests
             Assert.Equal(("Заказ музыки", "Ник", "трек"), _api.Added.Single());
         }
 
+        [Fact]
+        public async Task Add_PassesTheRewardAndTheQueueToTheApi()
+        {
+            await Post("/api/add", body: """{"title":"Музыка","reward_id":"r1","queue_id":"q2"}""");
+            await Post("/api/add", body: """{"title":"Своё"}""");
+
+            Assert.Equal(new (string?, string?)[] { ("r1", "q2"), ("", "") }, _api.AddedTo.ToArray());
+        }
+
         [Theory]
         [InlineData("не json")]
         [InlineData("{}")]
@@ -280,6 +291,29 @@ namespace RewardQueue.Tests
             Assert.Equal("Ник", entry.GetProperty("user_name").GetString());
             Assert.Equal("строка 1\nстрока 2", entry.GetProperty("user_input").GetString());
             Assert.Equal(new[] { "a" }, root.GetProperty("rewards").EnumerateArray().Select(r => r.GetProperty("id").GetString()).ToArray());
+        }
+
+        [Fact]
+        public void BuildStateJson_CarriesQueuesWithNamesLimitsAndTotal()
+        {
+            var rewards = RewardSettings.Empty
+                .WithKnown(new[] { new RewardInfo { id = "a", title = "Техника" }, new RewardInfo { id = "b", title = "Музыка" } })
+                .WithTracked("a", true).WithTracked("b", true).AddQueue();
+            string second = rewards.Queues[1].id;
+            rewards = rewards.MoveReward("b", second).RenameQueue(second, "Музыка").SetShowLimit(second, 3).WithShowTotal(7);
+
+            using var doc = JsonDocument.Parse(QueueApi.BuildStateJson(Array.Empty<QueueEntry>(), rewards));
+            var root = doc.RootElement;
+
+            var queues = root.GetProperty("queues");
+            Assert.Equal(2, queues.GetArrayLength());
+            Assert.Equal("", queues[0].GetProperty("name").GetString());
+            Assert.Equal(0, queues[0].GetProperty("show_limit").GetInt32());
+            Assert.Equal("Музыка", queues[1].GetProperty("name").GetString());
+            Assert.Equal(3, queues[1].GetProperty("show_limit").GetInt32());
+            Assert.Equal(second, queues[1].GetProperty("id").GetString());
+            Assert.Equal(new[] { "b" }, queues[1].GetProperty("reward_ids").EnumerateArray().Select(x => x.GetString()).ToArray());
+            Assert.Equal(7, root.GetProperty("show_total").GetInt32());
         }
 
         [Fact]
