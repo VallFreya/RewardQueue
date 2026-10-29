@@ -13,6 +13,7 @@
     --input: #1d1f26; --primary: #284cb8; --primary-hover: #476bd7;
     --ok-bg: #2f4a3d; --ok-border: #57906f; --ok: #8cd1a6;
     --bad-bg: #4b2f37; --bad-border: #9a5560; --bad: #e8929c;
+    --frame: #7c9bff; --lift: rgba(0, 0, 0, .45);
     color-scheme: dark;
   }
   :root[data-theme="light"] {
@@ -22,6 +23,7 @@
     --input: #fefefe; --primary: #8cb5ff; --primary-hover: #b2cfff;
     --ok-bg: #d8ebdf; --ok-border: #8dbb9e; --ok: #2e7d4f;
     --bad-bg: #f3dada; --bad-border: #cb8f8f; --bad: #b03a48;
+    --frame: #6b9bff; --lift: rgba(0, 0, 0, .3);
     color-scheme: light;
   }
   * { box-sizing: border-box; }
@@ -74,6 +76,9 @@
 
   /* закреплённая внизу полоса: свёрнута до одной строки, раскрытая закрывает часть очереди */
   #addBar { flex: none; background: var(--base); border-top: 1px solid var(--border); max-height: 75%; overflow-y: auto; }
+  /* раскрытая форма обведена бледно-синей рамкой и приподнята тенью, чтобы не сливаться с очередью под ней */
+  #addBar.open { border: 2px solid var(--frame); border-bottom-width: 0; background: color-mix(in srgb, var(--frame) 9%, var(--base)); box-shadow: 0 -8px 14px -6px var(--lift); }
+  #addBar.open #addToggle:hover { background: color-mix(in srgb, var(--frame) 16%, var(--base)); }
   #addToggle { display: flex; align-items: center; justify-content: space-between; width: 100%; background: transparent; border: 0; border-radius: 0; padding: 10px 12px; font-weight: 600; text-align: left; }
   #addToggle:hover { background: var(--button-hover); }
   form { padding: 0 12px 12px; display: grid; gap: 8px; }
@@ -328,6 +333,7 @@
     const open = $("addForm").hidden;
     $("addForm").hidden = !open;
     $("addToggle").setAttribute("aria-expanded", String(open));
+    $("addBar").classList.toggle("open", open);
     $("chev").textContent = open ? "\u25BE" : "\u25B8";
     if (open) $("addBar").scrollTop = 0;
   };
