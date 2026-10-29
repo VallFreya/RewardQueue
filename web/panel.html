@@ -47,17 +47,23 @@
   .empty[hidden] { display: none; }
 
   .entry { background: var(--base); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; margin-bottom: 8px; }
-  .entry.first { background: var(--ok-bg); border-color: var(--ok-border); }
-  .head { display: flex; align-items: baseline; gap: 8px; }
-  .num { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.4em; }
-  .title { font-weight: 600; flex: 1; overflow-wrap: anywhere; }
-  .time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .entry.current { background: var(--ok-bg); border-color: var(--ok-border); }
+  .head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .time { color: var(--muted); font-size: 12px; white-space: nowrap; margin-left: auto; }
   .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
-  .who { margin-top: 2px; color: var(--ok); font-weight: 600; overflow-wrap: anywhere; }
+  .who { color: var(--ok); font-weight: 700; overflow-wrap: anywhere; }
+  .current .who { color: var(--text); font-size: 16px; }
   .msg { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .start { background: var(--primary); border-color: var(--primary); }
+  .start:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
   .done { background: var(--ok-bg); border-color: var(--ok-border); }
   .remove { background: var(--bad-bg); border-color: var(--bad-border); }
+  .current-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; color: var(--ok); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .rtitle { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
+  .group { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .dot-r { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
 
   details { margin-top: 12px; background: var(--base); border: 1px solid var(--border); border-radius: 4px; }
   summary { cursor: pointer; padding: 9px 12px; font-weight: 600; }
@@ -91,6 +97,7 @@
 
 <div id="offline" class="banner" hidden>Нет связи с плагином. Страница переподключится сама.</div>
 <div id="empty" class="empty">Очередь пуста</div>
+<div id="current"></div>
 <div id="list"></div>
 
 <details id="add">
@@ -160,31 +167,87 @@
     }
   }
 
+  // Цвет награды: один и тот же для одной награды (по названию), чтобы группы легко различались
+  const PALETTE = ["#7aa2ff", "#ff9ec7", "#ffc66e", "#7be0c3", "#c3a2ff", "#ff8b7a", "#9fd86e", "#6ec9ff"];
+  function colorFor(title) {
+    let h = 0;
+    for (const ch of title) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return PALETTE[h % PALETTE.length];
+  }
+
+  function button(className, text, handler) {
+    const b = el("button", className, text);
+    b.onclick = () => handler(b);
+    return b;
+  }
+
+  // Запись целиком: номер в очереди, ник, время, сообщение и кнопки. В группе название награды стоит в заголовке группы,
+  // а у «делаемой» записи оно показано в её собственной шапке
+  function entryCard(entry, number, isCurrent) {
+    const card = el("article", "entry" + (isCurrent ? " current" : ""));
+
+    if (isCurrent) {
+      const label = el("div", "current-label", "Сейчас делаю");
+      const rt = el("span", "rtitle");
+      const dot = el("span", "dot-r");
+      dot.style.setProperty("--c", colorFor(entry.reward_title));
+      rt.append(dot, document.createTextNode(entry.reward_title));
+      label.append(rt);
+      card.append(label);
+    }
+
+    const head = el("div", "head");
+    head.append(el("span", "num", "№" + number));
+    if (entry.user_name) head.append(el("span", "who", entry.user_name));
+    if (entry.source === "manual") head.append(el("span", "tag", "вручную"));
+    head.append(el("span", "time", formatTime(entry.redeemed_at)));
+    card.append(head);
+
+    if (entry.user_input) card.append(el("div", "msg", entry.user_input));
+
+    const actions = el("div", "actions");
+    if (isCurrent) {
+      actions.append(
+        button("done", "Выполнено", (b) => command(b, "/api/done", entry.id)),
+        button("", "Вернуть в очередь", (b) => command(b, "/api/release", entry.id)),
+        button("remove", "Убрать", (b) => command(b, "/api/remove", entry.id)));
+    } else {
+      actions.append(
+        button("start", "Делаю", (b) => command(b, "/api/start", entry.id)),
+        button("done", "Выполнено", (b) => command(b, "/api/done", entry.id)),
+        button("remove", "Убрать", (b) => command(b, "/api/remove", entry.id)));
+    }
+    card.append(actions);
+    return card;
+  }
+
+  // Сверху запись, которую делают; ниже остальные по наградам. Порядок групп по тому, чья запись выше в очереди,
+  // порядок внутри группы по очереди. Номер у записи общий: место в очереди
   function renderEntries(entries) {
+    const current = $("current");
     const list = $("list");
+    current.textContent = "";
     list.textContent = "";
+
+    const working = entries.length > 0 && entries[0].in_progress ? entries[0] : null;
+    if (working) current.append(entryCard(working, 1, true));
+
+    const groups = new Map();
     entries.forEach((entry, i) => {
-      const card = el("article", "entry" + (i === 0 ? " first" : ""));
-
-      const head = el("div", "head");
-      head.append(el("span", "num", String(i + 1)), el("span", "title", entry.reward_title));
-      if (entry.source === "manual") head.append(el("span", "tag", "вручную"));
-      head.append(el("span", "time", formatTime(entry.redeemed_at)));
-      card.append(head);
-
-      if (entry.user_name) card.append(el("div", "who", entry.user_name));
-      if (entry.user_input) card.append(el("div", "msg", entry.user_input));
-
-      const actions = el("div", "actions");
-      const done = el("button", "done", "Выполнено");
-      done.onclick = () => command(done, "/api/done", entry.id);
-      const remove = el("button", "remove", "Убрать");
-      remove.onclick = () => command(remove, "/api/remove", entry.id);
-      actions.append(done, remove);
-      card.append(actions);
-
-      list.append(card);
+      if (entry === working) return;
+      if (!groups.has(entry.reward_title)) groups.set(entry.reward_title, []);
+      groups.get(entry.reward_title).push({ entry, number: i + 1 });
     });
+
+    groups.forEach((items, title) => {
+      const header = el("div", "group");
+      const dot = el("span", "dot-r");
+      dot.style.setProperty("--c", colorFor(title));
+      header.append(dot, document.createTextNode(title + " · " + items.length));
+      list.append(header);
+      items.forEach(({ entry, number }) => list.append(entryCard(entry, number, false)));
+    });
+
     $("empty").hidden = entries.length > 0;
     $("count").textContent = String(entries.length);
   }

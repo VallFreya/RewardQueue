@@ -51,6 +51,30 @@ namespace RewardQueue
             return Mutate(() => _state.Add(entry)) ? entry.id : null;
         }
 
+        /// <summary>«Делаю»: запись становится первой и «делаемой». false, если такой записи нет</summary>
+        public bool StartWorking(string id)
+        {
+            bool found = false;
+            Mutate(() =>
+            {
+                found = _state.StartWorking(id, out bool changed);
+                return changed;
+            });
+            return found;
+        }
+
+        /// <summary>«Вернуть в очередь»: запись снова обычная и встаёт на место по времени. false, если записи нет</summary>
+        public bool ReleaseWorking(string id)
+        {
+            bool found = false;
+            Mutate(() =>
+            {
+                found = _state.ReleaseWorking(id, out bool changed);
+                return changed;
+            });
+            return found;
+        }
+
         /// <summary>«Выполнено» или «Убрать»</summary>
         public bool Remove(string id) => Mutate(() => _state.Remove(id) != null);
 

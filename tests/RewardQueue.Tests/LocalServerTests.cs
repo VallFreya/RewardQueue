@@ -10,6 +10,8 @@ namespace RewardQueue.Tests
     {
         public string State = """{"type":"state","entries":[],"rewards":[]}""";
         public List<string> Removed { get; } = new List<string>();
+        public List<string> Started { get; } = new List<string>();
+        public List<string> Released { get; } = new List<string>();
         public List<(string Title, string? User, string? Input)> Added { get; } = new();
         public HashSet<string> KnownIds { get; } = new HashSet<string> { "known" };
 
@@ -18,6 +20,18 @@ namespace RewardQueue.Tests
         public bool Remove(string id)
         {
             Removed.Add(id);
+            return KnownIds.Contains(id);
+        }
+
+        public bool Start(string id)
+        {
+            Started.Add(id);
+            return KnownIds.Contains(id);
+        }
+
+        public bool Release(string id)
+        {
+            Released.Add(id);
             return KnownIds.Contains(id);
         }
 
@@ -110,6 +124,26 @@ namespace RewardQueue.Tests
 
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
             Assert.Equal(new[] { "known" }, _api.Removed.ToArray());
+        }
+
+        [Fact]
+        public async Task Start_AndRelease_PassTheIdToTheQueue()
+        {
+            Assert.Equal(HttpStatusCode.NoContent, (await Post("/api/start", "&id=known")).StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, (await Post("/api/release", "&id=known")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await Post("/api/start", "&id=нет-такой")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await Post("/api/release")).StatusCode);
+
+            Assert.Equal(new[] { "known", "нет-такой" }, _api.Started.ToArray());
+            Assert.Equal(new[] { "known" }, _api.Released.ToArray());
+        }
+
+        [Fact]
+        public async Task Start_RequiresKeyAndOrigin()
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, (await Post("/api/start", "&id=known", withOrigin: false)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await _http.PostAsync($"http://127.0.0.1:{_port}/api/start?id=known", null)).StatusCode);
+            Assert.Empty(_api.Started);
         }
 
         [Fact]

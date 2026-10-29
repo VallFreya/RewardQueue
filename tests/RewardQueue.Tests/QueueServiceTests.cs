@@ -144,6 +144,65 @@ namespace RewardQueue.Tests
         }
 
         [Fact]
+        public void StartWorking_IsSavedAndRestoredAfterRestart()
+        {
+            var service = Open();
+            service.Add(Twitch("a", 30));
+            service.Add(Twitch("b", 20));
+            service.Add(Twitch("c", 10));
+
+            Assert.True(service.StartWorking("c"));
+
+            var restored = Open().Snapshot();
+            Assert.Equal(new[] { "c", "a", "b" }, restored.Select(e => e.id).ToArray());
+            Assert.True(restored[0].in_progress);
+        }
+
+        [Fact]
+        public void StartWorking_RaisesChangedOnlyWhenSomethingChanged()
+        {
+            var service = Open();
+            service.Add(Twitch("a", 30));
+            service.Add(Twitch("b", 20));
+            int changes = 0;
+            service.Changed += () => changes++;
+
+            service.StartWorking("b");
+            service.StartWorking("b");   // повтор ничего не меняет
+            Assert.Equal(1, changes);
+
+            Assert.False(service.StartWorking("нет"));
+            Assert.Equal(1, changes);
+        }
+
+        [Fact]
+        public void ReleaseWorking_PutsTheEntryBackAndSaves()
+        {
+            var service = Open();
+            service.Add(Twitch("a", 30));
+            service.Add(Twitch("b", 20));
+            service.StartWorking("b");
+
+            Assert.True(service.ReleaseWorking("b"));
+
+            Assert.Equal(new[] { "a", "b" }, Open().Snapshot().Select(e => e.id).ToArray());
+            Assert.False(service.ReleaseWorking("нет"));
+        }
+
+        [Fact]
+        public void CompleteFirst_RemovesTheWorkedOnEntry()
+        {
+            var service = Open();
+            service.Add(Twitch("a", 30));
+            service.Add(Twitch("b", 20));
+            service.StartWorking("b");
+
+            Assert.True(service.CompleteFirst());
+
+            Assert.Equal("a", service.Snapshot().Single().id);
+        }
+
+        [Fact]
         public void BrokenFileAtStart_GivesEmptyQueueAndKeepsCopy()
         {
             File.WriteAllText(_path, "{ мусор");

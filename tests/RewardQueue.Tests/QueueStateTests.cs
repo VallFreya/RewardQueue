@@ -192,11 +192,158 @@ namespace RewardQueue.Tests
         }
 
         [Fact]
-        public void Constructor_LoadsInitialEntriesSortedAndDeduplicated()
+        public void Constructor_RestoresEntriesInFileOrderAndDropsRepeatsAndGarbage()
         {
+            // порядок файла сохраняется как есть: он мог быть изменён кнопкой «Делаю»
             var state = new QueueState(new[] { Entry("b", 2), Entry("a", 1), Entry("a", 5), Entry("", 3) });
 
-            Assert.Equal(new[] { "a", "b" }, Ids(state));
+            Assert.Equal(new[] { "b", "a" }, Ids(state));
+        }
+
+        // ---- «Делаю» ----
+
+        private static QueueState ThreeEntries()
+        {
+            var state = new QueueState();
+            state.Add(Entry("a", 1));
+            state.Add(Entry("b", 2));
+            state.Add(Entry("c", 3));
+            return state;
+        }
+
+        [Fact]
+        public void StartWorking_MovesTheEntryFirstAndKeepsTheOthersInOrder()
+        {
+            var state = ThreeEntries();
+
+            Assert.True(state.StartWorking("c", out bool changed));
+
+            Assert.True(changed);
+            Assert.Equal(new[] { "c", "a", "b" }, Ids(state));
+            Assert.True(state.Snapshot()[0].in_progress);
+            Assert.All(state.Snapshot().Skip(1), e => Assert.False(e.in_progress));
+        }
+
+        [Fact]
+        public void StartWorking_OnTheFirstEntryOnlyMarksIt()
+        {
+            var state = ThreeEntries();
+
+            Assert.True(state.StartWorking("a", out bool changed));
+
+            Assert.True(changed);
+            Assert.Equal(new[] { "a", "b", "c" }, Ids(state));
+            Assert.True(state.Snapshot()[0].in_progress);
+        }
+
+        [Fact]
+        public void StartWorking_Twice_ChangesNothingTheSecondTime()
+        {
+            var state = ThreeEntries();
+            state.StartWorking("b", out _);
+
+            Assert.True(state.StartWorking("b", out bool changed));
+
+            Assert.False(changed);
+            Assert.Equal(new[] { "b", "a", "c" }, Ids(state));
+        }
+
+        [Fact]
+        public void StartWorking_AnotherEntry_PreviousOneStaysSecondWithoutTheMark()
+        {
+            var state = ThreeEntries();
+            state.StartWorking("b", out _);
+
+            state.StartWorking("c", out _);
+
+            var snapshot = state.Snapshot();
+            Assert.Equal(new[] { "c", "b", "a" }, snapshot.Select(e => e.id).ToArray());
+            Assert.Equal(new[] { true, false, false }, snapshot.Select(e => e.in_progress).ToArray());
+        }
+
+        [Fact]
+        public void StartWorking_UnknownId_IsNotFound()
+        {
+            var state = ThreeEntries();
+
+            Assert.False(state.StartWorking("нет", out bool changed));
+            Assert.False(changed);
+            Assert.Equal(new[] { "a", "b", "c" }, Ids(state));
+        }
+
+        [Fact]
+        public void ReleaseWorking_ReturnsTheEntryToItsPlaceByTime()
+        {
+            var state = ThreeEntries();
+            state.StartWorking("c", out _);
+
+            Assert.True(state.ReleaseWorking("c", out bool changed));
+
+            Assert.True(changed);
+            Assert.Equal(new[] { "a", "b", "c" }, Ids(state));
+            Assert.All(state.Snapshot(), e => Assert.False(e.in_progress));
+        }
+
+        [Fact]
+        public void ReleaseWorking_OfAnEntryThatIsNotWorkedOn_ChangesNothing()
+        {
+            var state = ThreeEntries();
+
+            Assert.True(state.ReleaseWorking("b", out bool changed));
+            Assert.False(changed);
+            Assert.False(state.ReleaseWorking("нет", out _));
+        }
+
+        [Fact]
+        public void NewEntry_IsNeverInsertedBeforeTheWorkedOnOne()
+        {
+            var state = ThreeEntries();
+            state.StartWorking("c", out _);
+
+            // заказана раньше всех, но перед «делаемой» первой записью не встаёт
+            state.Add(Entry("old", -100));
+
+            Assert.Equal(new[] { "c", "old", "a", "b" }, Ids(state));
+        }
+
+        [Fact]
+        public void NewEntry_CannotComeInAlreadyMarkedAsWorkedOn()
+        {
+            var state = ThreeEntries();
+            var sneaky = Entry("x", 10);
+            sneaky.in_progress = true;
+
+            state.Add(sneaky);
+
+            Assert.All(state.Snapshot(), e => Assert.False(e.in_progress));
+        }
+
+        [Fact]
+        public void Constructor_KeepsTheWorkedOnEntryFirstAndOnlyOne()
+        {
+            var a = Entry("a", 1);
+            var b = Entry("b", 2);
+            var c = Entry("c", 3);
+            b.in_progress = true;
+            c.in_progress = true;
+
+            var state = new QueueState(new[] { a, b, c });
+
+            var snapshot = state.Snapshot();
+            Assert.Equal(new[] { "b", "a", "c" }, snapshot.Select(e => e.id).ToArray());
+            Assert.Equal(new[] { true, false, false }, snapshot.Select(e => e.in_progress).ToArray());
+        }
+
+        [Fact]
+        public void RemovingTheWorkedOnEntry_LeavesNobodyWorkedOn()
+        {
+            var state = ThreeEntries();
+            state.StartWorking("b", out _);
+
+            state.Remove("b");
+
+            Assert.All(state.Snapshot(), e => Assert.False(e.in_progress));
+            Assert.Equal(new[] { "a", "c" }, Ids(state));
         }
 
         [Fact]

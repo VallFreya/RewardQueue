@@ -41,6 +41,12 @@ namespace RewardQueue
         /// <summary>«Выполнено» и «Убрать»: убирает запись. false, если такой записи нет</summary>
         bool Remove(string id);
 
+        /// <summary>«Делаю»: запись поднимается на первое место. false, если такой записи нет</summary>
+        bool Start(string id);
+
+        /// <summary>«Вернуть в очередь»: пометка снимается. false, если такой записи нет</summary>
+        bool Release(string id);
+
         /// <summary>Ручное добавление. Возвращает id записи или null, если название пустое</summary>
         string? AddManual(string title, string? user, string? input);
     }
@@ -51,6 +57,10 @@ namespace RewardQueue
         public string BuildState() => BuildStateJson(QueueService.Current?.Snapshot() ?? Array.Empty<QueueEntry>(), Plugin.Rewards);
 
         public bool Remove(string id) => QueueService.Current?.Remove(id) ?? false;
+
+        public bool Start(string id) => QueueService.Current?.StartWorking(id) ?? false;
+
+        public bool Release(string id) => QueueService.Current?.ReleaseWorking(id) ?? false;
 
         public string? AddManual(string title, string? user, string? input) => QueueService.Current?.AddManual(title, user, input);
 

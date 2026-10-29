@@ -19,6 +19,9 @@ namespace RewardQueue
         public string user_input { get; set; } = "";
         // Время заказа: по нему строится порядок. У ручной записи это время добавления
         public DateTimeOffset redeemed_at { get; set; }
+        // Запись, которую делают прямо сейчас (кнопка «Делаю»): она первая в очереди, на трансляции показывается крупно.
+        // Не больше одной записи
+        public bool in_progress { get; set; }
 
         public QueueEntry Clone() => (QueueEntry)MemberwiseClone();
     }

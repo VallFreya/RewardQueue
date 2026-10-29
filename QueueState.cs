@@ -19,12 +19,30 @@ namespace RewardQueue
         private readonly object _lock = new object();
         private readonly List<QueueEntry> _entries = new List<QueueEntry>();
 
+        /// <summary>
+        /// Очередь из сохранённых записей. Порядок файла сохраняется как есть (запись, поднятая кнопкой «Делаю», остаётся первой),
+        /// повторы по id отбрасываются. Если «делаемых» записей несколько, остаётся первая из них, и она ставится на первое место
+        /// </summary>
         public QueueState(IEnumerable<QueueEntry>? initial = null)
         {
             if (initial == null) return;
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entry in initial)
             {
-                if (entry != null) Add(entry);
+                var clean = entry == null ? null : Normalize(entry);
+                if (clean == null || !seen.Add(clean.id)) continue;
+                _entries.Add(clean);
+            }
+
+            int working = _entries.FindIndex(e => e.in_progress);
+            foreach (var e in _entries) e.in_progress = false;
+            if (working >= 0)
+            {
+                var current = _entries[working];
+                current.in_progress = true;
+                _entries.RemoveAt(working);
+                _entries.Insert(0, current);
             }
         }
 
@@ -33,7 +51,7 @@ namespace RewardQueue
             get { lock (_lock) return _entries.Count; }
         }
 
-        /// <summary>Копия очереди в порядке показа: кто заказал раньше, тот выше</summary>
+        /// <summary>Копия очереди в порядке показа: кто заказал раньше, тот выше; «делаемая» запись первая</summary>
         public IReadOnlyList<QueueEntry> Snapshot()
         {
             lock (_lock) return _entries.Select(e => e.Clone()).ToList();
@@ -49,15 +67,83 @@ namespace RewardQueue
         {
             var clean = Normalize(entry);
             if (clean == null) return false;
+            // новая запись никогда не «делается сейчас»: это решает только кнопка
+            clean.in_progress = false;
 
             lock (_lock)
             {
                 if (_entries.Any(e => e.id == clean.id)) return false;
 
-                // после всех записей не позже этой: при одинаковом времени порядок добавления сохраняется
-                int index = _entries.Count;
-                while (index > 0 && _entries[index - 1].redeemed_at > clean.redeemed_at) index--;
-                _entries.Insert(index, clean);
+                InsertByTime(clean);
+                return true;
+            }
+        }
+
+        // После всех записей не позже этой: при одинаковом времени порядок добавления сохраняется.
+        // Перед «делаемой» первой записью новая не встаёт, даже если заказана раньше
+        private void InsertByTime(QueueEntry entry)
+        {
+            int floor = _entries.Count > 0 && _entries[0].in_progress ? 1 : 0;
+            int index = _entries.Count;
+            while (index > floor && _entries[index - 1].redeemed_at > entry.redeemed_at) index--;
+            _entries.Insert(index, entry);
+        }
+
+        /// <summary>
+        /// Кнопка «Делаю»: запись поднимается на первое место и помечается «делаю сейчас», порядок остальных не меняется.
+        /// Прежняя «делаемая» запись остаётся на втором месте уже без пометки. found: запись есть;
+        /// changed: что-то действительно изменилось (повторное нажатие ничего не меняет)
+        /// </summary>
+        public bool StartWorking(string id, out bool changed)
+        {
+            changed = false;
+            lock (_lock)
+            {
+                int index = _entries.FindIndex(e => e.id == id);
+                if (index < 0) return false;
+
+                var target = _entries[index];
+                foreach (var other in _entries)
+                {
+                    if (other != target && other.in_progress)
+                    {
+                        other.in_progress = false;
+                        changed = true;
+                    }
+                }
+
+                if (!target.in_progress)
+                {
+                    target.in_progress = true;
+                    changed = true;
+                }
+
+                if (index != 0)
+                {
+                    _entries.RemoveAt(index);
+                    _entries.Insert(0, target);
+                    changed = true;
+                }
+                return true;
+            }
+        }
+
+        /// <summary>«Вернуть в очередь»: пометка снимается, запись возвращается на место по времени заказа</summary>
+        public bool ReleaseWorking(string id, out bool changed)
+        {
+            changed = false;
+            lock (_lock)
+            {
+                int index = _entries.FindIndex(e => e.id == id);
+                if (index < 0) return false;
+
+                var target = _entries[index];
+                if (!target.in_progress) return true;
+
+                _entries.RemoveAt(index);
+                target.in_progress = false;
+                InsertByTime(target);
+                changed = true;
                 return true;
             }
         }
@@ -128,7 +214,8 @@ namespace RewardQueue
                 reward_title = title,
                 user_name = Limit(entry.user_name, MaxNameLength),
                 user_input = Limit(entry.user_input, MaxInputLength),
-                redeemed_at = entry.redeemed_at
+                redeemed_at = entry.redeemed_at,
+                in_progress = entry.in_progress
             };
         }
 

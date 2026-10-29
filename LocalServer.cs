@@ -162,6 +162,8 @@ namespace RewardQueue
             else if (isGet && path == "/overlay") await SendResource(response, "web/overlay.html").ConfigureAwait(false);
             else if (isGet && path == "/events") await ServeEvents(response).ConfigureAwait(false);
             else if (request.HttpMethod == "POST" && (path == "/api/done" || path == "/api/remove")) RemoveEntry(request, response);
+            else if (request.HttpMethod == "POST" && path == "/api/start") Finish(response, Command(request, _api.Start));
+            else if (request.HttpMethod == "POST" && path == "/api/release") Finish(response, Command(request, _api.Release));
             else if (request.HttpMethod == "POST" && path == "/api/add") await AddEntry(request, response).ConfigureAwait(false);
             else Finish(response, 404);
         }
@@ -191,10 +193,13 @@ namespace RewardQueue
         }
 
         // «Выполнено» и «Убрать» для очереди одно и то же: запись удаляется
-        private void RemoveEntry(HttpListenerRequest request, HttpListenerResponse response)
+        private void RemoveEntry(HttpListenerRequest request, HttpListenerResponse response) => Finish(response, Command(request, _api.Remove));
+
+        // Команда над записью по id из строки запроса: 204, если запись есть, иначе 404
+        private static int Command(HttpListenerRequest request, Func<string, bool> action)
         {
             string id = request.QueryString["id"] ?? "";
-            Finish(response, id.Length > 0 && _api.Remove(id) ? 204 : 404);
+            return id.Length > 0 && action(id) ? 204 : 404;
         }
 
         private async Task AddEntry(HttpListenerRequest request, HttpListenerResponse response)

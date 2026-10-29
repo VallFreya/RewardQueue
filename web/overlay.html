@@ -6,13 +6,20 @@
 <title>Очередь наград</title>
 <style>
   /* Страница для трансляции: фон прозрачный, размер задаёт источник «Браузер» в OBS.
-     Награды идут сверху вниз по порядку заказа и показываются, пока целиком помещаются по высоте. */
+     Запись, которую делают сейчас (кнопка «Делаю»), показывается крупной карточкой, остальные идут списком.
+     Если никто не выбран, все записи идут списком. Записи показываются, пока целиком помещаются по высоте. */
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-  #list { position: absolute; inset: 0; overflow: hidden; font: 600 28px/1.25 "Segoe UI", sans-serif; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, .85); }
-  .entry { margin: 0 0 14px; overflow-wrap: anywhere; }
-  .title { font-size: 1em; }
-  .who { font-size: 1em; font-weight: 700; color: #9fe0b5; }
-  .msg { font-size: .85em; font-weight: 400; white-space: pre-wrap; opacity: .95; }
+  #list { position: absolute; inset: 0; overflow: hidden; font: 400 20px/1.3 "Segoe UI", sans-serif; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, .85); }
+
+  .now { margin: 0 0 14px; padding: 12px 16px; background: rgba(18, 20, 28, .82); border: 2px solid #9fe0b5; border-radius: 14px; text-shadow: none; overflow-wrap: anywhere; }
+  .now .label { font-size: .62em; letter-spacing: .1em; text-transform: uppercase; color: #9fe0b5; font-weight: 700; }
+  .now .nick { font-size: 1.4em; font-weight: 700; line-height: 1.15; }
+  .now .text { font-size: 1.05em; margin-top: 2px; white-space: pre-wrap; }
+
+  .item { margin: 0 0 8px; opacity: .93; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .item .num { color: rgba(255, 255, 255, .7); font-variant-numeric: tabular-nums; }
+  .item .nick { font-weight: 700; }
+
   /* обрезка по числу строк (только когда сама первая запись не помещается в блок) */
   .clamp { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 </style>
@@ -24,32 +31,50 @@
   const list = document.getElementById("list");
   let entries = [];
 
-  function makeEntry(entry) {
-    const card = document.createElement("div");
-    card.className = "entry";
+  function div(className, text) {
+    const e = document.createElement("div");
+    e.className = className;
+    if (text !== undefined) e.textContent = text;   // только textContent: тексты зрителей не должны становиться HTML
+    return e;
+  }
 
-    // На трансляции название награды не пишем: зрителю важен ник и то, что он заказал (сообщение).
-    // Только если у записи нет ни ника, ни сообщения (добавлена вручную), показываем название, чтобы строка не была пустой.
-    // Везде только textContent: тексты зрителей не должны становиться HTML
-    if (entry.user_name) {
-      const who = document.createElement("div");
-      who.className = "who";
-      who.textContent = entry.user_name;
-      card.append(who);
-    }
-    if (entry.user_input) {
-      const msg = document.createElement("div");
-      msg.className = "msg";
-      msg.textContent = entry.user_input;
-      card.append(msg);
-    }
-    if (!entry.user_name && !entry.user_input) {
-      const title = document.createElement("div");
-      title.className = "title";
-      title.textContent = entry.reward_title;
-      card.append(title);
-    }
+  function span(className, text) {
+    const e = document.createElement("span");
+    e.className = className;
+    e.textContent = text;
+    return e;
+  }
+
+  // Название награды на трансляции не пишем: зрителю важен ник и то, что он заказал (сообщение).
+  // Только если у записи нет ни ника, ни сообщения (добавлена вручную), показываем название, чтобы строка не была пустой.
+  function nickOf(entry) {
+    return entry.user_name || (entry.user_input ? "" : entry.reward_title);
+  }
+
+  // Карточка «Сейчас»: запись, которую делают
+  function makeCurrent(entry) {
+    const card = div("now");
+    card.append(div("label", "Сейчас"));
+    const nick = nickOf(entry);
+    if (nick) card.append(div("nick", nick));
+    if (entry.user_input) card.append(div("text", entry.user_input));
     return card;
+  }
+
+  // Строка списка: «2. Ник — сообщение»
+  function makeItem(entry, number) {
+    const item = div("item");
+    item.append(span("num", number + ". "));
+    const nick = nickOf(entry);
+    if (nick) item.append(span("nick", nick));
+    if (nick && entry.user_input) item.append(document.createTextNode(" — "));
+    if (entry.user_input) item.append(document.createTextNode(entry.user_input));
+    return item;
+  }
+
+  // Записи идут по порядку заказа; «делаемая» запись всегда первая
+  function makeCard(entry, index) {
+    return entry.in_progress && index === 0 ? makeCurrent(entry) : makeItem(entry, index + 1);
   }
 
   // Запись целиком внутри блока: её нижний край не ниже нижнего края списка
@@ -62,9 +87,12 @@
     return Math.max(1, Math.round(part.getBoundingClientRect().height / lineHeight));
   }
 
-  // Первая запись не помещается: обрезаем текст многоточием по целым строкам, сначала сообщение, потом ник, потом название
+  // Первая запись не помещается: обрезаем текст многоточием по целым строкам.
+  // У карточки сначала сообщение, потом ник; у строки списка вся строка
   function fitFirst(card) {
-    const parts = [".msg", ".who", ".title"].map((s) => card.querySelector(s)).filter(Boolean);
+    const parts = card.classList.contains("now")
+      ? [card.querySelector(".text"), card.querySelector(".nick")].filter(Boolean)
+      : [card];
     for (const part of parts) {
       for (let lines = lineCount(part) - 1; lines >= 1; lines--) {
         part.classList.add("clamp");
@@ -72,6 +100,10 @@
         if (fits(card)) return;
       }
     }
+
+    // совсем низкий блок: убираем подпись «Сейчас», чтобы карточка поместилась
+    const label = card.querySelector(".label");
+    if (label && !fits(card)) label.remove();
   }
 
   // Показываем записи по порядку, пока очередная целиком помещается, и останавливаемся на первой, которая не влезла:
@@ -79,7 +111,7 @@
   function render() {
     list.textContent = "";
     for (let i = 0; i < entries.length; i++) {
-      const card = makeEntry(entries[i]);
+      const card = makeCard(entries[i], i);
       list.append(card);
       if (fits(card)) continue;
 
