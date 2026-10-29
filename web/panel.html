@@ -58,11 +58,11 @@
   .banner { margin: 0 0 12px; padding: 8px 12px; border-radius: 4px; background: var(--bad-bg); border: 1px solid var(--bad-border); color: var(--bad); }
   .banner[hidden] { display: none; }
 
-  /* очередь: строка с названием (сворачивает очередь) и кнопкой «Добавить», под ней записи и форма добавления */
+  /* очередь: строка с названием (сворачивает очередь) и кнопкой «Добавить», под ней форма добавления и записи */
   .queue { margin-bottom: 14px; }
   .qhead { display: flex; align-items: center; gap: 6px; border: 2px solid var(--frame); border-radius: 4px; background: color-mix(in srgb, var(--frame) 9%, var(--base)); }
   .qtoggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: transparent; border: 0; border-radius: 0; padding: 9px 10px; font-weight: 600; text-align: left; }
-  .qtoggle:hover { background: color-mix(in srgb, var(--frame) 16%, var(--base)); }
+  .qhead:hover { background: color-mix(in srgb, var(--frame) 16%, var(--base)); }
   .qname { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .qcount { color: var(--muted); font-weight: 400; }
   .chev { color: var(--muted); width: 1em; flex: none; }
@@ -93,14 +93,15 @@
   .gbody { overflow-y: auto; overscroll-behavior: contain; }
   .gbody.scroll { padding-right: 2px; }
 
-  /* форма добавления под списком очереди, обведена той же рамкой, что и строка очереди */
-  .addform { margin-top: 6px; padding: 10px; display: grid; gap: 8px; border: 2px solid var(--frame); border-radius: 4px; background: color-mix(in srgb, var(--frame) 9%, var(--base)); }
+  /* форма добавления над списком очереди (первой в очереди), обведена той же рамкой, что и строка очереди */
+  .addform { margin-bottom: 8px; padding: 10px; display: grid; gap: 8px; border: 2px solid var(--frame); border-radius: 4px; background: color-mix(in srgb, var(--frame) 9%, var(--base)); }
   .addform[hidden] { display: none; }
   .addform label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 2px; }
   .toprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
-  .closebtn { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; }
+  .toprow select.field, .closebtn { box-sizing: border-box; height: 36px; }
+  .closebtn { width: 36px; padding: 0; display: grid; place-items: center; }
   .closebtn:hover:not(:disabled) { background: var(--bad-bg); border-color: var(--bad); }
-  .closebtn svg { width: 12px; height: 12px; display: block; }
+  .closebtn svg { width: 14px; height: 14px; display: block; }
   .primary { background: var(--primary); border-color: var(--primary); }
   .primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
   .note { color: var(--muted); font-size: 12px; min-height: 1.2em; }
@@ -276,12 +277,12 @@
     const gbody = el("div", "gbody");
     gbody.dataset.group = queue.id;
     const form = buildForm(queue.id);
-    body.append(gbody, form.el);
+    body.append(form.el, gbody);
     section.append(head, body);
 
     const s = { queueId: queue.id, section, toggle, chev, dot, name, count, gbody, form, add };
     toggle.onclick = () => setCollapsed(s, !collapsed.has(queue.id));
-    // «Добавить» раскрывает форму под списком этой очереди (и саму очередь, если она свёрнута); повторное нажатие закрывает
+    // «Добавить» раскрывает форму над списком этой очереди (и саму очередь, если она свёрнута); повторное нажатие закрывает
     add.onclick = () => {
       if (form.el.hidden) {
         if (collapsed.has(queue.id)) setCollapsed(s, false);
