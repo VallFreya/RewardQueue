@@ -18,6 +18,11 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" />
   </ItemGroup>
 
+  <!-- Страницы дока и оверлея нужны серверу: тесты отдают их так же, как плагин -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\web\*.html" LogicalName="web/%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <!-- Плагин компилируется в тесты как исходники: его типы internal, а проверки идут без OBS (obs.dll не нужен) -->
   <ItemGroup>
     <Compile Include="..\..\*.cs" Exclude="..\..\obj\**;..\..\bin\**" />

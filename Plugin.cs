@@ -146,7 +146,7 @@ namespace RewardQueue
 
             try
             {
-                LocalServer.StartCurrent(Port, AccessKey);
+                LocalServer.StartCurrent(Port, AccessKey, new QueueApi());
             }
             catch (Exception ex)
             {
@@ -171,6 +171,10 @@ namespace RewardQueue
         {
             QueueService.Current = new QueueService(Path.Combine(GetConfigDirectory(), QueueStore.FileName), () => DateTimeOffset.UtcNow, RetentionDays);
             LogInfo($"Queue restored: {QueueService.Current.Count} entries");
+
+            // Любое изменение очереди или списка отмеченных наград сразу уходит на открытые страницы (док и оверлей)
+            QueueService.Current.Changed += () => LocalServer.Current?.PushState();
+            RewardsChanged += () => LocalServer.Current?.PushState();
 
             var auth = new TwitchAuth(Path.Combine(GetConfigDirectory(), TokenVault.FileName), ClientIdOverride);
             TwitchAuth.Current = auth;
@@ -453,12 +457,26 @@ namespace RewardQueue
         /// <summary>Меняет настройки наград (список или отметки) и записывает конфиг. Вызывается из окна и после обновления списка</summary>
         internal static bool UpdateRewards(Func<RewardSettings, RewardSettings> change)
         {
+            bool written;
             lock (RewardsLock)
             {
                 Rewards = change(Rewards);
-                return WriteConfig();
+                written = WriteConfig();
             }
+
+            try
+            {
+                RewardsChanged?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                LogError($"Rewards change handler failed: {ex.Message}");
+            }
+            return written;
         }
+
+        /// <summary>Список отмеченных наград изменился (док предлагает их при ручном добавлении)</summary>
+        internal static event Action? RewardsChanged;
 
         public static bool SetTheme(bool dark)
         {

@@ -1,33 +1,34 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Channels;
-using Timer = System.Threading.Timer;
 
 namespace RewardQueue
 {
     /// <summary>
-    /// Небольшой HTTP-сервер на 127.0.0.1: отдаёт страницы /panel и /overlay (встроены в DLL), поток обновлений /events (SSE)
-    /// и принимает команды страниц POST-ом. Доступ только с ключом и своим Host (см. ServerGuard).
-    /// Сейчас страницы тестовые: проверяют, что цепочка сервер → док/источник OBS работает.
+    /// Небольшой HTTP-сервер на 127.0.0.1: отдаёт страницы /panel (док) и /overlay (источник для трансляции), встроенные в DLL,
+    /// поток обновлений очереди /events (SSE) и принимает команды дока POST-ом (выполнено, убрать, добавить вручную).
+    /// Доступ только с ключом и своим Host, команды ещё и со своим Origin (см. ServerGuard).
     /// </summary>
     internal sealed class LocalServer : IDisposable
     {
         private const int KeepAliveMs = 15_000;
+        private const int MaxBodyBytes = 8 * 1024;
 
         private readonly int _port;
         private readonly string _key;
+        private readonly IQueueApi _api;
         private readonly HttpListener _listener = new HttpListener();
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private readonly ConcurrentDictionary<int, Channel<string>> _clients = new ConcurrentDictionary<int, Channel<string>>();
         private int _nextClientId;
-        private int _counter;
-        private Timer? _ticker;
 
-        public LocalServer(int port, string key)
+        public LocalServer(int port, string key, IQueueApi api)
         {
             _port = port;
             _key = key;
+            _api = api;
         }
 
         public static LocalServer? Current { get; private set; }
@@ -39,10 +40,10 @@ namespace RewardQueue
         public int ClientCount => _clients.Count;
 
         /// <summary>Запускает сервер. При неудаче причина остаётся в StartError, плагин при этом продолжает работать</summary>
-        public static void StartCurrent(int port, string key)
+        public static void StartCurrent(int port, string key, IQueueApi api)
         {
             StopCurrent();
-            var server = new LocalServer(port, key);
+            var server = new LocalServer(port, key, api);
             try
             {
                 server.Start();
@@ -68,40 +69,34 @@ namespace RewardQueue
             Plugin.LogInfo("Local server stopped");
         }
 
-        private void Start()
+        internal void Start()
         {
             _listener.Prefixes.Add($"http://{ServerGuard.LoopbackHost}:{_port}/");
             _listener.Start();
 
             _ = Task.Run(AcceptLoop);
-            _ticker = new Timer(OnTick, null, 1000, 1000);
         }
 
         public void Dispose()
         {
-            try { _ticker?.Dispose(); } catch { }
             try { _cts.Cancel(); } catch { }
             foreach (var client in _clients.Values) client.Writer.TryComplete();
             try { _listener.Close(); } catch { }
         }
 
-        // Тестовое обновление раз в секунду, только если есть кому его отдавать
-        private void OnTick(object? state)
+        /// <summary>Очередь или список отмеченных наград изменились: все открытые страницы получают новое состояние</summary>
+        public void PushState()
         {
             try
             {
                 if (_clients.IsEmpty) return;
-                Broadcast($"{{\"type\":\"tick\",\"time\":\"{DateTime.Now:HH:mm:ss}\"}}");
+                string state = _api.BuildState();
+                foreach (var client in _clients.Values) client.Writer.TryWrite(state);
             }
             catch (Exception ex)
             {
-                Plugin.LogError($"Local server tick failed: {ex.Message}");
+                Plugin.LogError($"Pushing the queue state failed: {ex.Message}");
             }
-        }
-
-        private void Broadcast(string json)
-        {
-            foreach (var client in _clients.Values) client.Writer.TryWrite(json);
         }
 
         private async Task AcceptLoop()
@@ -157,8 +152,7 @@ namespace RewardQueue
                 && (isGet || ServerGuard.OriginAllowed(request.Headers["Origin"], _port));
             if (!allowed)
             {
-                response.StatusCode = 403;
-                response.Close();
+                Finish(response, 403);
                 return;
             }
 
@@ -167,12 +161,15 @@ namespace RewardQueue
             if (isGet && path == "/panel") await SendResource(response, "web/panel.html").ConfigureAwait(false);
             else if (isGet && path == "/overlay") await SendResource(response, "web/overlay.html").ConfigureAwait(false);
             else if (isGet && path == "/events") await ServeEvents(response).ConfigureAwait(false);
-            else if (request.HttpMethod == "POST" && path == "/api/bump") Bump(response);
-            else
-            {
-                response.StatusCode = 404;
-                response.Close();
-            }
+            else if (request.HttpMethod == "POST" && (path == "/api/done" || path == "/api/remove")) RemoveEntry(request, response);
+            else if (request.HttpMethod == "POST" && path == "/api/add") await AddEntry(request, response).ConfigureAwait(false);
+            else Finish(response, 404);
+        }
+
+        private static void Finish(HttpListenerResponse response, int status)
+        {
+            response.StatusCode = status;
+            response.Close();
         }
 
         private static async Task SendResource(HttpListenerResponse response, string name)
@@ -180,8 +177,7 @@ namespace RewardQueue
             using Stream? stream = typeof(LocalServer).Assembly.GetManifestResourceStream(name);
             if (stream == null)
             {
-                response.StatusCode = 404;
-                response.Close();
+                Finish(response, 404);
                 return;
             }
 
@@ -194,12 +190,47 @@ namespace RewardQueue
             response.Close();
         }
 
-        private void Bump(HttpListenerResponse response)
+        // «Выполнено» и «Убрать» для очереди одно и то же: запись удаляется
+        private void RemoveEntry(HttpListenerRequest request, HttpListenerResponse response)
         {
-            int value = Interlocked.Increment(ref _counter);
-            Broadcast($"{{\"type\":\"counter\",\"value\":{value}}}");
+            string id = request.QueryString["id"] ?? "";
+            Finish(response, id.Length > 0 && _api.Remove(id) ? 204 : 404);
+        }
 
-            response.StatusCode = 204;
+        private async Task AddEntry(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (request.ContentLength64 > MaxBodyBytes)
+            {
+                Finish(response, 413);
+                return;
+            }
+
+            string body;
+            using (var reader = new StreamReader(request.InputStream, Encoding.UTF8, false, 1024, leaveOpen: true))
+            {
+                char[] buffer = new char[MaxBodyBytes + 1];
+                int read = await reader.ReadBlockAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
+                if (read > MaxBodyBytes)
+                {
+                    Finish(response, 413);
+                    return;
+                }
+                body = new string(buffer, 0, read);
+            }
+
+            var add = QueueApi.ParseAddRequest(body);
+            string? id = add == null ? null : _api.AddManual(add.title, add.user, add.input);
+            if (id == null)
+            {
+                Finish(response, 400);
+                return;
+            }
+
+            byte[] json = JsonSerializer.SerializeToUtf8Bytes(new AddResponse { id = id }, WebJsonContext.Default.AddResponse);
+            response.StatusCode = 200;
+            response.ContentType = "application/json; charset=utf-8";
+            response.ContentLength64 = json.Length;
+            await response.OutputStream.WriteAsync(json).ConfigureAwait(false);
             response.Close();
         }
 
@@ -216,7 +247,8 @@ namespace RewardQueue
             try
             {
                 var output = response.OutputStream;
-                await WriteEvent(output, $"{{\"type\":\"counter\",\"value\":{Volatile.Read(ref _counter)}}}").ConfigureAwait(false);
+                // страница сразу получает текущее состояние
+                await WriteEvent(output, _api.BuildState()).ConfigureAwait(false);
 
                 while (!_cts.IsCancellationRequested)
                 {
@@ -225,7 +257,11 @@ namespace RewardQueue
                     try
                     {
                         if (!await channel.Reader.WaitToReadAsync(wait.Token).ConfigureAwait(false)) break;
-                        while (channel.Reader.TryRead(out string? json)) await WriteEvent(output, json).ConfigureAwait(false);
+
+                        // если накопилось несколько обновлений, нужно только последнее: оно содержит всё состояние
+                        string? latest = null;
+                        while (channel.Reader.TryRead(out string? state)) latest = state;
+                        if (latest != null) await WriteEvent(output, latest).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (!_cts.IsCancellationRequested)
                     {
