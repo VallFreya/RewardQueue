@@ -23,6 +23,17 @@ namespace RewardQueue
         private Panel _content = null!;
         private Panel _bottomBar = null!;
         private Label _bottomLabel = null!;
+
+        // Подпись внизу: обычный текст → «Сохраняю…» → «Настройки сохранены» (3 секунды) → обычный текст
+        private enum SaveHint { Idle, Saving, Saved, Failed }
+        private readonly System.Windows.Forms.Timer _hintTimer = new System.Windows.Forms.Timer();
+        private SaveHint _hint = SaveHint.Idle;
+        private bool _pendingSaveOk = true;
+        // 0: ничего, 1: фон сохранил настройки, 2: фон не смог сохранить (список наград обновляется не в потоке окна)
+        private volatile int _externalSave;
+        /// <summary>Сколько показывается «Сохраняю…» и «Настройки сохранены» (в проверках сокращается)</summary>
+        internal int SavingHintMs = 400;
+        internal int SavedHintMs = 3000;
         private readonly List<Card> _cards = new List<Card>();
         private Label _serverLabel = null!;
         private Label _clientsLabel = null!;
@@ -60,10 +71,14 @@ namespace RewardQueue
             MinimumSize = SizeFromClientSize(new Size(Ui.Px(MinClientWidth), Ui.Px(MinClientHeight)));
 
             // состояние меняется редко, полсекунды хватает
+            _hintTimer.Tick += (s, e) => OnHintTimer();
             _liveTimer = new System.Windows.Forms.Timer { Interval = 500 };
             _liveTimer.Tick += (s, e) =>
             {
                 // список наград обновился: строки с галочками строятся заново
+                int external = Interlocked.Exchange(ref _externalSave, 0);
+                if (external != 0) ShowSaving(external == 1);
+
                 if (_rebuildRequested)
                 {
                     _rebuildRequested = false;
@@ -161,7 +176,7 @@ namespace RewardQueue
             var bottomBar = _bottomBar;
             _bottomLabel = new Label
             {
-                Text = Loc.AutoSaveHint,
+                Text = HintText(),
                 Dock = DockStyle.Fill,
                 AutoSize = false,
                 UseMnemonic = false,
@@ -188,7 +203,7 @@ namespace RewardQueue
         {
             if (dark == ObsTheme.IsDark) return;
 
-            Plugin.SetTheme(dark);
+            ShowSaving(Plugin.SetTheme(dark));
             ObsTheme.Apply(dark);
             RebuildUi();
         }
@@ -292,6 +307,64 @@ namespace RewardQueue
             }
             _content.AutoScrollMinSize = new Size(0, y + Ui.Px(CardPad));
             _content.ResumeLayout(false);
+        }
+
+        // ---- подпись про сохранение ----
+
+        private string HintText() => _hint switch
+        {
+            SaveHint.Saving => Loc.SavingHint,
+            SaveHint.Saved => Loc.SavedHint,
+            SaveHint.Failed => Loc.SaveFailedHint,
+            _ => Loc.AutoSaveHint
+        };
+
+        // Изменение внесено: показываем «Сохраняю…», затем результат. Настройки пишутся сразу (синхронно), а подпись
+        // держится заметное время, чтобы её можно было прочитать
+        private void ShowSaving(bool saved)
+        {
+            _pendingSaveOk = saved;
+            SetHint(SaveHint.Saving);
+            _hintTimer.Stop();
+            _hintTimer.Interval = Math.Max(1, SavingHintMs);
+            _hintTimer.Start();
+        }
+
+        /// <summary>Запускает подпись «Сохраняю…» без настоящего изменения (для снимков окна)</summary>
+        internal void TriggerSaveHintForPreview() => ShowSaving(true);
+
+        private void OnHintTimer()
+        {
+            _hintTimer.Stop();
+            switch (_hint)
+            {
+                case SaveHint.Saving:
+                    if (_pendingSaveOk)
+                    {
+                        SetHint(SaveHint.Saved);
+                        // через три секунды возвращается обычный текст
+                        _hintTimer.Interval = Math.Max(1, SavedHintMs);
+                        _hintTimer.Start();
+                    }
+                    else
+                    {
+                        // ошибка остаётся на экране до следующего изменения
+                        SetHint(SaveHint.Failed);
+                    }
+                    break;
+                case SaveHint.Saved:
+                    SetHint(SaveHint.Idle);
+                    break;
+            }
+        }
+
+        private void SetHint(SaveHint hint)
+        {
+            _hint = hint;
+            if (_bottomLabel == null) return;
+
+            _bottomLabel.Text = HintText();
+            FitBottomBar();
         }
 
         // Высоту полосы подгоняем после раскладки окна, а не внутри неё: изменение высоты во время прохода раскладки
@@ -438,7 +511,7 @@ namespace RewardQueue
             };
             box.CheckedChanged += (s, e) =>
             {
-                Plugin.UpdateRewards(r => r.WithTracked(id, box.Checked));
+                ShowSaving(Plugin.UpdateRewards(r => r.WithTracked(id, box.Checked)));
                 UpdateLive();
             };
             card.Panel.Controls.Add(box);
@@ -466,7 +539,8 @@ namespace RewardQueue
 
                 if (result.Kind == RewardsResultKind.Success)
                 {
-                    Plugin.UpdateRewards(r => r.WithKnown(result.Rewards));
+                    bool saved = Plugin.UpdateRewards(r => r.WithKnown(result.Rewards));
+                    _externalSave = saved ? 1 : 2;
                     _fetchMessage = result.Rewards.Count == 0 ? Loc.RewardsNoneOnChannel : Loc.RewardsLoaded(result.Rewards.Count);
                     _rebuildRequested = true;
                 }
@@ -697,6 +771,7 @@ namespace RewardQueue
             if (disposing)
             {
                 _liveTimer.Dispose();
+                _hintTimer.Dispose();
                 _tip.Dispose();
             }
             base.Dispose(disposing);

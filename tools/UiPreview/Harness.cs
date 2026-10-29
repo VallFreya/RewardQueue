@@ -57,6 +57,14 @@ namespace UiPreview
                 bool dark = !parts.Contains("light");
                 auth.SetSnapshotForPreview(AuthSnapshotFor(parts));
                 form.SwitchTheme(dark);
+                // UITEST_HINT=saving|saved: показывает подпись внизу в этом состоянии (интервалы длинные, чтобы успеть снять)
+                string? hint = Environment.GetEnvironmentVariable("UITEST_HINT");
+                if (hint != null)
+                {
+                    form.SavingHintMs = hint == "saving" ? 60000 : 1;
+                    form.SavedHintMs = 60000;
+                    form.TriggerSaveHintForPreview();
+                }
                 float k = form.DeviceDpi / 96f;
                 form.ClientSize = new Size((int)(int.Parse(size[0]) * k), (int)(int.Parse(size[1]) * k));
                 Pump(700);

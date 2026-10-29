@@ -451,19 +451,19 @@ namespace RewardQueue
 
         /// <summary>Запоминает тему окна</summary>
         /// <summary>Меняет настройки наград (список или отметки) и записывает конфиг. Вызывается из окна и после обновления списка</summary>
-        internal static void UpdateRewards(Func<RewardSettings, RewardSettings> change)
+        internal static bool UpdateRewards(Func<RewardSettings, RewardSettings> change)
         {
             lock (RewardsLock)
             {
                 Rewards = change(Rewards);
-                WriteConfig();
+                return WriteConfig();
             }
         }
 
-        public static void SetTheme(bool dark)
+        public static bool SetTheme(bool dark)
         {
             ThemeDark = dark;
-            WriteConfig();
+            return WriteConfig();
         }
 
         private static void OnMenuClicked(IntPtr privateData)

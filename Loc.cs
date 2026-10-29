@@ -51,9 +51,15 @@ namespace RewardQueue
         public static string ThemeDarkName => Ru ? "Тёмная" : "Dark";
         public static string ThemeLightName => Ru ? "Светлая" : "Light";
 
+        // Подпись внизу окна: обычный текст, затем «сохраняю», «сохранено» и снова обычный текст
         public static string AutoSaveHint => Ru
-            ? "Настройки сохраняются сразу, как только вы что-то меняете. Кнопки «Сохранить» нет."
-            : "Settings are saved as soon as you change anything. There is no Save button.";
+            ? "Настройки сохраняются автоматически, как только вы что-то меняете."
+            : "Settings are saved automatically as soon as you change anything.";
+        public static string SavingHint => Ru ? "Сохраняю…" : "Saving…";
+        public static string SavedHint => Ru ? "Настройки сохранены" : "Settings saved";
+        public static string SaveFailedHint => Ru
+            ? "Не удалось сохранить настройки (подробности в журнале). Изменения действуют до перезапуска OBS."
+            : "Could not save the settings (see the log). The changes work until OBS restarts.";
 
         // Блок «Вход в Twitch»
         public static string TwitchTitle => Ru ? "Вход в Twitch" : "Twitch login";
