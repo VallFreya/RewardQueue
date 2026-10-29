@@ -11,8 +11,8 @@
   #list { position: absolute; inset: 0; overflow: hidden; font: 600 28px/1.25 "Segoe UI", sans-serif; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, .85); }
   .entry { margin: 0 0 14px; overflow-wrap: anywhere; }
   .title { font-size: 1em; }
-  .who { font-size: .72em; font-weight: 600; color: #9fe0b5; }
-  .msg { font-size: .72em; font-weight: 400; white-space: pre-wrap; opacity: .95; }
+  .who { font-size: 1em; font-weight: 700; color: #9fe0b5; }
+  .msg { font-size: .85em; font-weight: 400; white-space: pre-wrap; opacity: .95; }
   /* обрезка по числу строк (только когда сама первая запись не помещается в блок) */
   .clamp { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 </style>
@@ -28,11 +28,9 @@
     const card = document.createElement("div");
     card.className = "entry";
 
-    const title = document.createElement("div");
-    title.className = "title";
-    title.textContent = entry.reward_title;   // только textContent: тексты зрителей не должны становиться HTML
-    card.append(title);
-
+    // На трансляции название награды не пишем: зрителю важен ник и то, что он заказал (сообщение).
+    // Только если у записи нет ни ника, ни сообщения (добавлена вручную), показываем название, чтобы строка не была пустой.
+    // Везде только textContent: тексты зрителей не должны становиться HTML
     if (entry.user_name) {
       const who = document.createElement("div");
       who.className = "who";
@@ -44,6 +42,12 @@
       msg.className = "msg";
       msg.textContent = entry.user_input;
       card.append(msg);
+    }
+    if (!entry.user_name && !entry.user_input) {
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = entry.reward_title;
+      card.append(title);
     }
     return card;
   }
