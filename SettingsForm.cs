@@ -26,6 +26,14 @@ namespace RewardQueue
         private Label _clientsLabel = null!;
         private Label _probeLabel = null!;
         private ThemedButton _probeButton = null!;
+        private Label _authStatus = null!;
+        private Label _authCode = null!;
+        private ThemedButton _authOpen = null!;
+        private ThemedButton _authCopy = null!;
+        private ThemedButton _authAction = null!;
+        private string _authShown = "";
+        // Скрытые элементы. Control.Visible в ещё не показанном окне всегда false, поэтому раскладка опирается на этот список
+        private readonly HashSet<Control> _hidden = new HashSet<Control>();
         private float _builtScale;
 
         public SettingsForm()
@@ -97,6 +105,14 @@ namespace RewardQueue
             content.AutoScroll = true;
             content.HandleCreated += (s, e) => Ui.ApplyScrollbarTheme(content.Handle);
             content.SizeChanged += (s, e) => LayoutContent();
+
+            _authShown = "";
+            _hidden.Clear();
+            var twitch = AddCard(Loc.TwitchTitle);
+            _authStatus = AddText(twitch, "", 0);
+            _authCode = AddText(twitch, "", 10, bold: true, scale: 1.8f);
+            AddAuthButtons(twitch, 12);
+            AddText(twitch, Loc.TwitchPrivacy, 12, muted: true);
 
             var addresses = AddCard(Loc.AddressesTitle);
             AddText(addresses, Loc.AddressesIntro, 0, muted: true);
@@ -233,7 +249,7 @@ namespace RewardQueue
         }
 
         // Подпись с переносом по словам: высота измеряется по ширине карточки
-        private Label AddText(Card card, string text, int gap, bool muted = false, bool bold = false)
+        private Label AddText(Card card, string text, int gap, bool muted = false, bool bold = false, float scale = 1f)
         {
             var label = new Label
             {
@@ -242,11 +258,14 @@ namespace RewardQueue
                 UseMnemonic = false,
                 BackColor = ObsTheme.BaseBg,
                 ForeColor = muted ? ObsTheme.TextMuted : ObsTheme.Text,
-                Font = bold ? Ui.Font(FontStyle.Bold) : Ui.Font()
+                Font = Ui.Font(bold ? FontStyle.Bold : FontStyle.Regular, scale)
             };
             card.Panel.Controls.Add(label);
             card.Add((top, width) =>
             {
+                // скрытая подпись места не занимает
+                if (_hidden.Contains(label)) return top;
+
                 top += Ui.Px(gap);
                 int height = MeasureHeight(label, width);
                 label.SetBounds(Ui.Px(CardPad), top, width, height);
@@ -341,14 +360,164 @@ namespace RewardQueue
 
         private static void ShowCopied(ThemedButton button)
         {
+            string normal = button.Text;
             button.Text = Loc.Copied;
             var timer = new System.Windows.Forms.Timer { Interval = 1500 };
             timer.Tick += (s, e) =>
             {
                 timer.Dispose();
-                if (!button.IsDisposed) button.Text = Loc.Copy;
+                if (!button.IsDisposed) button.Text = normal;
             };
             timer.Start();
+        }
+
+        // ---- вход в Twitch ----
+
+        // Кнопки входа: «Открыть страницу» и «Копировать код» (пока ждём подтверждения) и главная кнопка (Войти, Отмена или Выйти).
+        // Идут в ряд, при нехватке места переносятся на следующую строку; скрытые места не занимают
+        private void AddAuthButtons(Card card, int gap)
+        {
+            _authOpen = new ThemedButton { Text = Loc.AuthOpenPage };
+            _authOpen.Click += (s, e) => OpenLoginPage();
+            _authCopy = new ThemedButton { Text = Loc.AuthCopyCode, Glyph = Ui.GlyphCopy };
+            _authCopy.Click += (s, e) => CopyLoginCode();
+            _authAction = new ThemedButton { Text = Loc.AuthSignIn };
+            _authAction.Click += (s, e) => OnAuthAction();
+
+            var buttons = new[] { _authOpen, _authCopy, _authAction };
+            foreach (var button in buttons) card.Panel.Controls.Add(button);
+            SetShown(_authOpen, false);
+            SetShown(_authCopy, false);
+
+            card.Add((top, width) =>
+            {
+                top += Ui.Px(gap);
+                int x = 0;
+                int rowTop = top;
+                int height = Ui.Px(32);
+                foreach (var button in buttons)
+                {
+                    if (_hidden.Contains(button)) continue;
+
+                    int buttonWidth = Math.Min(width, Math.Max(Ui.Px(120), TextRenderer.MeasureText(button.Text, button.Font).Width + Ui.Px(48)));
+                    if (x > 0 && x + buttonWidth > width)
+                    {
+                        x = 0;
+                        rowTop += height + Ui.Px(8);
+                    }
+
+                    button.SetBounds(Ui.Px(CardPad) + x, rowTop, buttonWidth, height);
+                    x += buttonWidth + Ui.Px(8);
+                }
+                return rowTop + height;
+            });
+        }
+
+        private void OnAuthAction()
+        {
+            var auth = TwitchAuth.Current;
+            if (auth == null) return;
+
+            switch (auth.Snapshot.State)
+            {
+                case AuthState.SignedOut:
+                    // вход идёт в фоне: окно остаётся живым, состояние подхватит таймер
+                    _ = Task.Run(auth.LoginAsync);
+                    break;
+                case AuthState.WaitingForUser:
+                    auth.CancelLogin();
+                    break;
+                case AuthState.SignedIn:
+                    auth.SignOut();
+                    break;
+            }
+        }
+
+        // Страницу входа открываем только если адрес похож на адрес Twitch: ответ сервера нельзя считать безопасным для запуска
+        private void OpenLoginPage()
+        {
+            string uri = TwitchAuth.Current?.Snapshot.VerificationUri ?? "";
+            if (!IsTwitchUri(uri)) return;
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogWarn($"Could not open the login page: {ex.Message}");
+            }
+        }
+
+        internal static bool IsTwitchUri(string uri) =>
+            Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+            && parsed.Scheme == Uri.UriSchemeHttps
+            && (parsed.Host == "twitch.tv" || parsed.Host.EndsWith(".twitch.tv", StringComparison.Ordinal));
+
+        private void CopyLoginCode()
+        {
+            string code = TwitchAuth.Current?.Snapshot.UserCode ?? "";
+            if (code.Length == 0) return;
+
+            try
+            {
+                Clipboard.SetText(code);
+                ShowCopied(_authCopy);
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogWarn($"Could not copy the code: {ex.Message}");
+            }
+        }
+
+        // Показывает состояние входа. true, если что-то изменилось (раскладка могла поменяться)
+        private bool UpdateAuthUi()
+        {
+            var auth = TwitchAuth.Current;
+            var snapshot = auth?.Snapshot ?? new AuthSnapshot();
+            string signature = snapshot + "|" + (auth == null);
+            if (signature == _authShown) return false;
+            _authShown = signature;
+
+            string status;
+            Color color = ObsTheme.Text;
+            switch (snapshot.State)
+            {
+                case AuthState.WaitingForUser:
+                    status = Loc.AuthWaiting;
+                    break;
+                case AuthState.SignedIn:
+                    status = Loc.AuthSignedIn(snapshot.Login);
+                    if (snapshot.Problem != AuthProblem.None)
+                    {
+                        status += "\n" + Loc.AuthProblemText(snapshot.Problem, snapshot.Detail);
+                        color = ObsTheme.DangerAccent;
+                    }
+                    break;
+                default:
+                    status = snapshot.Problem == AuthProblem.None ? Loc.AuthSignedOut : Loc.AuthProblemText(snapshot.Problem, snapshot.Detail);
+                    if (snapshot.Problem != AuthProblem.None) color = ObsTheme.DangerAccent;
+                    break;
+            }
+
+            bool waiting = snapshot.State == AuthState.WaitingForUser;
+            _authStatus.Text = status;
+            _authStatus.ForeColor = color;
+            _authCode.Text = snapshot.UserCode;
+            SetShown(_authCode, waiting);
+            SetShown(_authOpen, waiting);
+            SetShown(_authCopy, waiting);
+
+            _authAction.Text = snapshot.State switch
+            {
+                AuthState.WaitingForUser => Loc.Cancel,
+                AuthState.SignedIn => Loc.AuthSignOut,
+                _ => Loc.AuthSignIn
+            };
+            _authAction.Primary = snapshot.State == AuthState.SignedOut;
+            _authAction.Enabled = auth != null;
+            _authAction.Invalidate();
+            return true;
         }
 
         private static void StartProbe()
@@ -359,7 +528,7 @@ namespace RewardQueue
         private void UpdateLive()
         {
             var server = LocalServer.Current;
-            bool changed = false;
+            bool changed = UpdateAuthUi();
             changed |= SetText(_serverLabel, server != null
                 ? Loc.ServerRunning(server.Port)
                 : Loc.ServerFailed(LocalServer.StartError == "port is busy" ? Loc.PortBusy : LocalServer.StartError ?? "-"));
@@ -375,6 +544,14 @@ namespace RewardQueue
 
             // новый текст мог занять другое число строк
             if (changed) LayoutContent();
+        }
+
+        // Показывает или прячет элемент; раскладка берёт скрытые из _hidden
+        private void SetShown(Control control, bool shown)
+        {
+            control.Visible = shown;
+            if (shown) _hidden.Remove(control);
+            else _hidden.Add(control);
         }
 
         private static bool SetText(Label label, string text)

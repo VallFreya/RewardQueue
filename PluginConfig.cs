@@ -14,6 +14,8 @@ namespace RewardQueue
         public string access_key { get; set; } = "";
         // Сколько дней хранится невыполненная запись очереди; потом она удаляется
         public int retention_days { get; set; } = QueueState.DefaultRetentionDays;
+        // Свой Client ID приложения Twitch вместо встроенного (для форка или на случай блокировки приложения). Пусто: встроенный
+        public string client_id { get; set; } = "";
     }
 
     // Source Generator для NativeAOT (убирает требование рефлексии)

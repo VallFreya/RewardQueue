@@ -39,6 +39,12 @@ namespace RewardQueue
         /// <summary>Сколько дней хранится невыполненная запись очереди</summary>
         public static int RetentionDays { get; private set; } = QueueState.DefaultRetentionDays;
 
+        /// <summary>Свой Client ID Twitch из config.json (пусто: встроенный). Хранится, чтобы запись конфига его не стирала</summary>
+        public static string ClientIdOverride { get; private set; } = "";
+
+        // Проверка токена Twitch раз в час: refresh-токен обновляется при использовании, а отозванный вход надо заметить
+        private static System.Threading.Timer? _authTimer;
+
         private static IntPtr _moduleName = IntPtr.Zero;
         private static int _settingsOpen;
 
@@ -145,7 +151,53 @@ namespace RewardQueue
                 LogError($"Failed to start the local server: {ex.Message}");
             }
 
+            try
+            {
+                StartTwitchLogin();
+            }
+            catch (Exception ex)
+            {
+                LogError($"Failed to start the Twitch login: {ex.Message}");
+            }
+
             return true;
+        }
+
+        // Читает сохранённый вход и проверяет его у Twitch в фоне, дальше проверка идёт раз в час
+        private static void StartTwitchLogin()
+        {
+            var auth = new TwitchAuth(Path.Combine(GetConfigDirectory(), TokenVault.FileName), ClientIdOverride);
+            TwitchAuth.Current = auth;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await auth.InitializeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Twitch login initialization failed: {ex.Message}");
+                }
+            });
+
+            _authTimer = new System.Threading.Timer(OnAuthTimer, null, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+        }
+
+        // Поток пула: исключение отсюда завершило бы процесс OBS
+        private static void OnAuthTimer(object? state)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var auth = TwitchAuth.Current;
+                    if (auth != null) await auth.RevalidateAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Twitch login check failed: {ex.Message}");
+                }
+            });
         }
 
         [UnmanagedCallersOnly(EntryPoint = "obs_module_unload", CallConvs = new[] { typeof(CallConvCdecl) })]
@@ -155,6 +207,10 @@ namespace RewardQueue
             try
             {
                 CloseSettingsWindow();
+                _authTimer?.Dispose();
+                _authTimer = null;
+                TwitchAuth.Current?.Dispose();
+                TwitchAuth.Current = null;
                 LocalServer.StopCurrent();
             }
             catch (Exception ex)
@@ -250,6 +306,7 @@ namespace RewardQueue
                 Port = ServerGuard.ClampPort(config.port);
                 AccessKey = ServerGuard.IsValidKey(config.access_key) ? config.access_key : "";
                 RetentionDays = QueueState.ClampRetentionDays(config.retention_days);
+                ClientIdOverride = TwitchAuth.ValidClientId(config.client_id) ? config.client_id : "";
                 LogInfo($"Loaded config from '{configPath}'");
             }
             catch (Exception ex)
@@ -305,7 +362,7 @@ namespace RewardQueue
             try
             {
                 configPath = GetConfigFilePath();
-                var config = new PluginConfig { theme = ThemeDark ? "dark" : "light", port = Port, access_key = AccessKey, retention_days = RetentionDays };
+                var config = new PluginConfig { theme = ThemeDark ? "dark" : "light", port = Port, access_key = AccessKey, retention_days = RetentionDays, client_id = ClientIdOverride };
 
                 string json = JsonSerializer.Serialize(config, JsonContext.PluginConfig);
                 AtomicFile.WriteAllText(configPath, json, Encoding.UTF8);

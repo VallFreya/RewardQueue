@@ -51,6 +51,33 @@ namespace RewardQueue
         public static string ThemeDarkName => Ru ? "Тёмная" : "Dark";
         public static string ThemeLightName => Ru ? "Светлая" : "Light";
 
+        // Блок «Вход в Twitch»
+        public static string TwitchTitle => Ru ? "Вход в Twitch" : "Twitch login";
+        public static string AuthSignedOut => Ru
+            ? "Вход не выполнен. Пока вы не войдёте, плагин не увидит заказы наград."
+            : "Not signed in. The plugin cannot see reward redemptions until you sign in.";
+        public static string AuthSignedIn(string login) => Ru ? $"Вы вошли как {login}" : $"Signed in as {login}";
+        public static string AuthWaiting => Ru
+            ? "Откройте страницу входа и подтвердите доступ. Если страница попросит код, введите код ниже. Окно можно оставить открытым: плагин сам узнает о подтверждении."
+            : "Open the login page and confirm access. If the page asks for a code, enter the code below. You can leave this window open: the plugin will notice the confirmation.";
+        public static string AuthSignIn => Ru ? "Войти через Twitch" : "Sign in with Twitch";
+        public static string AuthSignOut => Ru ? "Выйти" : "Sign out";
+        public static string AuthOpenPage => Ru ? "Открыть страницу входа" : "Open the login page";
+        public static string AuthCopyCode => Ru ? "Копировать код" : "Copy code";
+        public static string TwitchPrivacy => Ru
+            ? "Плагин получает только право читать заказы наград. Пароль вводится на сайте Twitch и плагину не передаётся; вход хранится на этом компьютере в зашифрованном виде."
+            : "The plugin only gets permission to read reward redemptions. Your password is entered on the Twitch site and never reaches the plugin; the login is stored on this computer in encrypted form.";
+
+        public static string AuthProblemText(AuthProblem problem, string detail) => problem switch
+        {
+            AuthProblem.Offline => Ru ? "Нет связи с Twitch. Вход сохранён, проверка повторится позже." : "No connection to Twitch. The login is kept, the check will be repeated later.",
+            AuthProblem.Denied => Ru ? "Доступ не подтверждён. Нажмите «Войти» и попробуйте ещё раз." : "Access was not confirmed. Click Sign in and try again.",
+            AuthProblem.CodeExpired => Ru ? "Время ввода кода истекло. Нажмите «Войти» ещё раз." : "The code has expired. Click Sign in again.",
+            AuthProblem.MissingScope => Ru ? "Twitch не выдал нужное право (чтение заказов наград). Войдите заново и разрешите доступ." : "Twitch did not grant the required permission (reading reward redemptions). Sign in again and allow access.",
+            AuthProblem.SessionExpired => Ru ? "Вход истёк: Twitch отозвал его или давно не видел плагин. Войдите заново." : "The login has expired: Twitch revoked it or has not seen the plugin for a long time. Sign in again.",
+            _ => Ru ? $"Не удалось выполнить вход{(detail.Length > 0 ? ": " + detail : "")}" : $"Sign in failed{(detail.Length > 0 ? ": " + detail : "")}"
+        };
+
         // Блок «Адреса для OBS»
         public static string AddressesTitle => Ru ? "Адреса для OBS" : "Addresses for OBS";
         public static string AddressesIntro => Ru
