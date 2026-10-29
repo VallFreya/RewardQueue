@@ -13,7 +13,8 @@
     --input: #1d1f26; --primary: #284cb8; --primary-hover: #476bd7;
     --ok-bg: #2f4a3d; --ok-border: #57906f; --ok: #8cd1a6;
     --bad-bg: #4b2f37; --bad-border: #9a5560; --bad: #e8929c;
-    --frame: #7c9bff; --lift: rgba(0, 0, 0, .45);
+    --frame: #7c9bff;
+    --scroll: #3c404d; --scroll-hover: #5b6273;
     color-scheme: dark;
   }
   :root[data-theme="light"] {
@@ -23,15 +24,23 @@
     --input: #fefefe; --primary: #8cb5ff; --primary-hover: #b2cfff;
     --ok-bg: #d8ebdf; --ok-border: #8dbb9e; --ok: #2e7d4f;
     --bad-bg: #f3dada; --bad-border: #cb8f8f; --bad: #b03a48;
-    --frame: #6b9bff; --lift: rgba(0, 0, 0, .3);
+    --frame: #6b9bff;
+    --scroll: #b3b3b3; --scroll-hover: #8f8f8f;
     color-scheme: light;
   }
   * { box-sizing: border-box; }
-  /* Док занимает всю высоту: сверху шапка, в середине очередь (прокручивается), снизу закреплена форма ручного добавления */
+
+  /* Тонкие полосы прокрутки, как в OBS: узкая скруглённая «ручка» без стрелок и фона */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; min-height: 28px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover); background-clip: padding-box; border: 2px solid transparent; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
   html, body { height: 100%; }
   body { margin: 0; display: flex; flex-direction: column; font: 14px/1.45 "Segoe UI", sans-serif; background: var(--window); color: var(--text); }
   header { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 12px 10px; }
-  main { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
+  main { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px 12px; }
   h1 { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px; }
   .count { font-size: 12px; font-weight: 600; padding: 1px 9px; border-radius: 999px; background: var(--button); color: var(--text); }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
@@ -48,8 +57,20 @@
 
   .banner { margin: 0 0 12px; padding: 8px 12px; border-radius: 4px; background: var(--bad-bg); border: 1px solid var(--bad-border); color: var(--bad); }
   .banner[hidden] { display: none; }
-  .empty { padding: 20px 14px; text-align: center; color: var(--muted); background: var(--base); border: 1px solid var(--border); border-radius: 4px; }
-  .empty[hidden] { display: none; }
+
+  /* очередь: строка с названием (сворачивает очередь) и кнопкой «Добавить», под ней записи и форма добавления */
+  .queue { margin-bottom: 14px; }
+  .qhead { display: flex; align-items: center; gap: 6px; border: 2px solid var(--frame); border-radius: 4px; background: color-mix(in srgb, var(--frame) 9%, var(--base)); }
+  .qtoggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: transparent; border: 0; border-radius: 0; padding: 9px 10px; font-weight: 600; text-align: left; }
+  .qtoggle:hover { background: color-mix(in srgb, var(--frame) 16%, var(--base)); }
+  .qname { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qcount { color: var(--muted); font-weight: 400; }
+  .chev { color: var(--muted); width: 1em; flex: none; }
+  .qadd { flex: none; margin: 4px 6px 4px 0; padding: 4px 11px; }
+  .collapsed .qbody { display: none; }
+  .qbody { padding-top: 8px; }
+  .qempty { color: var(--muted); font-size: 12px; padding: 0 2px 8px; }
+  .dot-r { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
 
   .entry { background: var(--base); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; margin-bottom: 8px; }
   .entry.current { background: var(--ok-bg); border-color: var(--ok-border); }
@@ -65,25 +86,21 @@
   .start { background: var(--primary); border-color: var(--primary); }
   .start:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
   .done { background: var(--ok-bg); border-color: var(--ok-border); }
-  .remove { background: var(--bad-bg); border-color: var(--bad-border); }
+  .remove, .closebtn { background: var(--bad-bg); border-color: var(--bad-border); }
   .current-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; color: var(--ok); margin-bottom: 4px; }
-  .qempty { color: var(--muted); font-size: 12px; padding: 0 2px 6px; }
-  .group { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  .dot-r { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
 
-  /* внутри группы видно минимум три записи; если их больше, группа прокручивается, а не растягивается (высоту ставит скрипт) */
+  /* когда очередей несколько, в каждой видны минимум три записи, остальные прокручиваются внутри очереди (высоту ставит скрипт) */
   .gbody { overflow-y: auto; overscroll-behavior: contain; }
-  .gbody.scroll { padding-right: 4px; }
+  .gbody.scroll { padding-right: 2px; }
 
-  /* закреплённая внизу полоса: свёрнута до одной строки, раскрытая закрывает часть очереди.
-     И свёрнутая, и раскрытая обведены бледно-синей рамкой с синеватым фоном и тенью сверху, чтобы не сливаться с очередью */
-  #addBar { flex: none; max-height: 75%; overflow-y: auto; border: 2px solid var(--frame); border-bottom-width: 0;
-    background: color-mix(in srgb, var(--frame) 9%, var(--base)); box-shadow: 0 -8px 14px -6px var(--lift); }
-  #addToggle { display: flex; align-items: center; justify-content: space-between; width: 100%; background: transparent; border: 0; border-radius: 0; padding: 10px 12px; font-weight: 600; text-align: left; }
-  #addToggle:hover { background: color-mix(in srgb, var(--frame) 16%, var(--base)); }
-  form { padding: 0 12px 12px; display: grid; gap: 8px; }
-  form[hidden] { display: none; }
-  form label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 2px; }
+  /* форма добавления под списком очереди, обведена той же рамкой, что и строка очереди */
+  .addform { margin-top: 6px; padding: 10px; display: grid; gap: 8px; border: 2px solid var(--frame); border-radius: 4px; background: color-mix(in srgb, var(--frame) 9%, var(--base)); }
+  .addform[hidden] { display: none; }
+  .addform label { color: var(--muted); font-size: 12px; display: block; margin-bottom: 2px; }
+  .toprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+  .closebtn { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; }
+  .closebtn:hover:not(:disabled) { background: var(--bad-bg); border-color: var(--bad); }
+  .closebtn svg { width: 12px; height: 12px; display: block; }
   .primary { background: var(--primary); border-color: var(--primary); }
   .primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
   .note { color: var(--muted); font-size: 12px; min-height: 1.2em; }
@@ -112,43 +129,15 @@
 
 <main id="content">
   <div id="offline" class="banner" hidden>Нет связи с плагином. Страница переподключится сама.</div>
-  <div id="empty" class="empty">Очередь пуста</div>
   <div id="list"></div>
 </main>
-
-<section id="addBar">
-  <button id="addToggle" type="button" aria-expanded="false" aria-controls="addForm"><span>Добавить вручную</span><span id="chev" aria-hidden="true">▸</span></button>
-  <form id="addForm" autocomplete="off" hidden>
-    <div>
-      <label for="reward">Награда</label>
-      <select id="reward" class="field"></select>
-    </div>
-    <div id="customRow">
-      <label for="custom">Название</label>
-      <input id="custom" maxlength="100" placeholder="Например, Заказ техники">
-    </div>
-    <div id="queueRow">
-      <label for="queue">Очередь</label>
-      <select id="queue" class="field"></select>
-    </div>
-    <div>
-      <label for="user">Ник (необязательно)</label>
-      <input id="user" maxlength="50">
-    </div>
-    <div>
-      <label for="input">Сообщение (необязательно)</label>
-      <textarea id="input" maxlength="500"></textarea>
-    </div>
-    <div><button id="addButton" class="primary" type="submit">Добавить в очередь</button></div>
-    <div id="addNote" class="note"></div>
-  </form>
-</section>
 
 <script>
   const key = new URLSearchParams(location.search).get("key") || "";
   const q = "key=" + encodeURIComponent(key);
   const $ = (id) => document.getElementById(id);
   const OTHER = "__other__";
+  const CLOSE_ICON = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/></svg>';
 
   // ---- тема ----
   const themeEl = $("theme");
@@ -158,7 +147,6 @@
     try { localStorage.setItem("rq-panel-theme", themeEl.value); } catch (e) { }
   };
 
-  // ---- очередь ----
   function formatTime(iso) {
     const d = new Date(iso);
     if (isNaN(d)) return "";
@@ -237,49 +225,224 @@
     return card;
   }
 
+  // ---- очереди ----
+  // У каждой очереди свой блок, который создаётся один раз и потом только обновляется: форма добавления внутри него
+  // не пересоздаётся, поэтому набранный текст и фокус не теряются, когда приходит новый заказ
   let queueList = [{ id: "main", name: "" }];
-  function queueTitle(queue, index) {
-    return queue.name || "Очередь " + (index + 1);
+  let rewardTitles = new Map();
+  const sections = new Map();
+
+  function loadCollapsed() {
+    try { return new Set(JSON.parse(localStorage.getItem("rq-collapsed") || "[]")); } catch (e) { return new Set(); }
+  }
+  const collapsed = loadCollapsed();
+  function saveCollapsed() {
+    try { localStorage.setItem("rq-collapsed", JSON.stringify([...collapsed])); } catch (e) { }
   }
 
-  // Очереди по порядку из настроек. В каждой своя запись «Сейчас делаю» сверху (если есть) и своя нумерация с 1.
-  // Заголовок очереди показывается, если очередей больше одной или у очереди есть название
+  function queueTitle(queue, index) {
+    return queue.name || (queueList.length > 1 ? "Очередь " + (index + 1) : "Очередь");
+  }
+
+  function setCollapsed(s, value) {
+    if (value) collapsed.add(s.queueId); else collapsed.delete(s.queueId);
+    saveCollapsed();
+    applyCollapsed(s);
+    limitGroups();
+  }
+
+  function applyCollapsed(s) {
+    const isCollapsed = collapsed.has(s.queueId);
+    s.section.classList.toggle("collapsed", isCollapsed);
+    s.chev.textContent = isCollapsed ? "▸" : "▾";
+    s.toggle.setAttribute("aria-expanded", String(!isCollapsed));
+  }
+
+  function createSection(queue) {
+    const section = el("section", "queue");
+    const head = el("div", "qhead");
+    const toggle = el("button", "qtoggle");
+    toggle.type = "button";
+    const chev = el("span", "chev");
+    const dot = el("span", "dot-r");
+    const name = el("span", "qname");
+    const count = el("span", "qcount");
+    toggle.append(chev, dot, name, count);
+    const add = el("button", "qadd primary", "+ Добавить");
+    add.type = "button";
+    head.append(toggle, add);
+
+    const body = el("div", "qbody");
+    const gbody = el("div", "gbody");
+    gbody.dataset.group = queue.id;
+    const form = buildForm(queue.id);
+    body.append(gbody, form.el);
+    section.append(head, body);
+
+    const s = { queueId: queue.id, section, toggle, chev, dot, name, count, gbody, form, add };
+    toggle.onclick = () => setCollapsed(s, !collapsed.has(queue.id));
+    // «Добавить» раскрывает форму под списком этой очереди (и саму очередь, если она свёрнута); повторное нажатие закрывает
+    add.onclick = () => {
+      if (form.el.hidden) {
+        if (collapsed.has(queue.id)) setCollapsed(s, false);
+        form.el.hidden = false;
+        updateCustomRow(form);
+        (form.customRow.hidden ? form.select : form.custom).focus();
+      } else {
+        form.el.hidden = true;
+      }
+    };
+    sections.set(queue.id, s);
+    return s;
+  }
+
+  // ---- форма добавления (у каждой очереди своя) ----
+  function buildForm(queueId) {
+    const formEl = el("form", "addform");
+    formEl.hidden = true;
+    formEl.autocomplete = "off";
+
+    const select = el("select", "field");
+    const close = el("button", "closebtn");
+    close.type = "button";
+    close.title = "Закрыть";
+    close.setAttribute("aria-label", "Закрыть форму");
+    close.innerHTML = CLOSE_ICON;   // постоянная разметка значка, не данные зрителей
+
+    const top = el("div", "toprow");
+    const rewardBox = el("div");
+    rewardBox.append(el("label", "", "Награда"), select);
+    top.append(rewardBox, close);
+
+    const custom = el("input");
+    custom.maxLength = 100;
+    custom.placeholder = "Например, Заказ техники";
+    const customRow = el("div");
+    customRow.append(el("label", "", "Название"), custom);
+
+    const user = el("input");
+    user.maxLength = 50;
+    const userRow = el("div");
+    userRow.append(el("label", "", "Ник (необязательно)"), user);
+
+    const input = el("textarea");
+    input.maxLength = 500;
+    const inputRow = el("div");
+    inputRow.append(el("label", "", "Сообщение (необязательно)"), input);
+
+    const submit = el("button", "primary", "Добавить в очередь");
+    submit.type = "submit";
+    const note = el("div", "note");
+    const submitRow = el("div");
+    submitRow.append(submit);
+
+    formEl.append(top, customRow, userRow, inputRow, submitRow, note);
+
+    const form = { el: formEl, select, close, custom, customRow, user, input, submit, note, rewardsKey: null };
+    select.onchange = () => updateCustomRow(form);
+    close.onclick = () => { formEl.hidden = true; };
+    formEl.onsubmit = async (event) => {
+      event.preventDefault();
+      const isCustom = select.value === OTHER;
+      const title = isCustom ? custom.value.trim() : select.options[select.selectedIndex].textContent;
+      if (!title) {
+        note.className = "note bad";
+        note.textContent = "Укажите название награды.";
+        return;
+      }
+
+      submit.disabled = true;
+      try {
+        const r = await fetch("/api/add?" + q, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, user: user.value, input: input.value, reward_id: isCustom ? "" : select.value, queue_id: queueId })
+        });
+        if (!r.ok) throw new Error(r.status);
+        user.value = "";
+        input.value = "";
+        note.className = "note ok";
+        note.textContent = "Добавлено.";
+        setTimeout(() => { if (note.textContent === "Добавлено.") note.textContent = ""; }, 3000);
+      } catch (e) {
+        note.className = "note bad";
+        note.textContent = "Не удалось добавить запись.";
+      } finally {
+        submit.disabled = false;
+      }
+    };
+    return form;
+  }
+
+  function updateCustomRow(form) {
+    form.customRow.hidden = form.select.value !== OTHER;
+  }
+
+  // Награды в списке формы только этой очереди: куда добавлять, определяется самой очередью
+  function updateForm(s, queue) {
+    const form = s.form;
+    const rewards = (queue.reward_ids || []).map((id) => ({ id, title: rewardTitles.get(id) || id }));
+    const signature = JSON.stringify(rewards);
+    if (signature === form.rewardsKey) return;   // список не менялся: не трогаем форму, чтобы не сбить ввод
+    form.rewardsKey = signature;
+
+    const previous = form.select.value;
+    form.select.textContent = "";
+    rewards.forEach((r) => {
+      const option = el("option", "", r.title);
+      option.value = r.id;
+      form.select.append(option);
+    });
+    const other = el("option", "", rewards.length ? "Другое…" : "Своё название");
+    other.value = OTHER;
+    form.select.append(other);
+    if ([...form.select.options].some((o) => o.value === previous)) form.select.value = previous;
+    updateCustomRow(form);
+  }
+
+  // Очереди по порядку из настроек. В каждой своя запись «Сейчас делаю» сверху (если есть) и своя нумерация с 1
   function renderEntries(state) {
     const entries = state.entries || [];
     queueList = state.queues && state.queues.length ? state.queues : [{ id: "main", name: "" }];
+    rewardTitles = new Map((state.rewards || []).map((r) => [r.id, r.title]));
     const list = $("list");
 
     // прокрутка страницы и очередей сохраняется: состояние приходит на каждое изменение
     const pageScroll = $("content").scrollTop;
-    const groupScroll = new Map([...document.querySelectorAll(".gbody")].map((b) => [b.dataset.group, b.scrollTop]));
-    list.textContent = "";
+    const groupScroll = new Map([...sections].map(([id, s]) => [id, s.gbody.scrollTop]));
+
+    // удалённых очередей на странице больше нет
+    for (const [id, s] of [...sections]) {
+      if (!queueList.some((x) => x.id === id)) {
+        s.section.remove();
+        sections.delete(id);
+      }
+    }
 
     const byQueue = new Map(queueList.map((queue) => [queue.id, []]));
     entries.forEach((entry) => (byQueue.get(entry.queue_id) || byQueue.get(queueList[0].id)).push(entry));
 
     queueList.forEach((queue, index) => {
-      const items = byQueue.get(queue.id);
-      if (queueList.length > 1 || queue.name) {
-        const header = el("div", "group");
-        const dot = el("span", "dot-r");
-        dot.style.setProperty("--c", PALETTE[index % PALETTE.length]);
-        header.append(dot, document.createTextNode(queueTitle(queue, index) + " \u00b7 " + items.length));
-        list.append(header);
-      }
+      const s = sections.get(queue.id) || createSection(queue);
+      if (list.children[index] !== s.section) list.insertBefore(s.section, list.children[index] || null);
 
-      const body = el("div", "gbody");
-      body.dataset.group = queue.id;
-      if (items.length === 0 && queueList.length > 1) body.append(el("div", "qempty", "Пусто"));
-      items.forEach((entry, i) => body.append(entryCard(entry, i + 1, entry.in_progress && i === 0)));
-      list.append(body);
+      const items = byQueue.get(queue.id);
+      s.name.textContent = queueTitle(queue, index);
+      s.count.textContent = "· " + items.length;
+      s.dot.style.setProperty("--c", PALETTE[index % PALETTE.length]);
+      applyCollapsed(s);
+
+      s.gbody.textContent = "";
+      if (items.length === 0) s.gbody.append(el("div", "qempty", "Пусто"));
+      items.forEach((entry, i) => s.gbody.append(entryCard(entry, i + 1, entry.in_progress && i === 0)));
+      updateForm(s, queue);
     });
 
-    $("empty").hidden = entries.length > 0;
     $("count").textContent = String(entries.length);
     limitGroups();
 
     $("content").scrollTop = pageScroll;
-    document.querySelectorAll(".gbody").forEach((b) => { b.scrollTop = groupScroll.get(b.dataset.group) || 0; });
+    sections.forEach((s, id) => { s.gbody.scrollTop = groupScroll.get(id) || 0; });
   }
 
   // Когда очередей несколько, в каждой видны минимум три записи; если их больше, высота очереди равна высоте первых трёх,
@@ -287,11 +450,12 @@
   // Если очередь одна, ограничения нет: список растёт, а прокручивается весь док
   const VISIBLE_ENTRIES = 3;
   function limitGroups() {
-    document.querySelectorAll(".gbody").forEach((body) => {
+    sections.forEach((s) => {
+      const body = s.gbody;
       body.style.maxHeight = "";
       body.classList.remove("scroll");
-      if (queueList.length <= 1) return;
-      const cards = body.children;
+      if (queueList.length <= 1 || collapsed.has(s.queueId)) return;
+      const cards = [...body.children].filter((c) => c.classList.contains("entry"));
       if (cards.length <= VISIBLE_ENTRIES) return;
       const third = cards[VISIBLE_ENTRIES - 1];
       // нижний край третьей записи вместе с отступом под ней
@@ -303,97 +467,6 @@
   window.addEventListener("resize", limitGroups);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(limitGroups);
 
-  // ---- ручное добавление ----
-  // Награда из списка сама определяет очередь; для своего названия очередь выбирается (если их больше одной)
-  let formKey = null;
-  function renderRewards(state) {
-    const rewards = state.rewards || [];
-    const signature = JSON.stringify([rewards, queueList.map((x) => [x.id, x.name])]);
-    if (signature === formKey) return;   // ничего не менялось: форму не трогаем, чтобы не сбить ввод
-    formKey = signature;
-
-    const select = $("reward");
-    const previous = select.value;
-    select.textContent = "";
-    rewards.forEach((r) => {
-      const option = el("option", "", r.title || r.id);
-      option.value = r.id;
-      select.append(option);
-    });
-    const other = el("option", "", rewards.length ? "Другое…" : "Своё название");
-    other.value = OTHER;
-    select.append(other);
-    if ([...select.options].some((o) => o.value === previous)) select.value = previous;
-
-    const queueSelect = $("queue");
-    const previousQueue = queueSelect.value;
-    queueSelect.textContent = "";
-    queueList.forEach((queue, index) => {
-      const option = el("option", "", queueTitle(queue, index));
-      option.value = queue.id;
-      queueSelect.append(option);
-    });
-    if ([...queueSelect.options].some((o) => o.value === previousQueue)) queueSelect.value = previousQueue;
-
-    updateCustomRow();
-  }
-
-  function updateCustomRow() {
-    const custom = $("reward").value === OTHER;
-    $("customRow").hidden = !custom;
-    $("queueRow").hidden = !custom || queueList.length <= 1;
-  }
-  $("reward").onchange = updateCustomRow;
-
-  // Форма закреплена внизу и по умолчанию свёрнута (одна строка с названием и значком раскрытия)
-  $("addToggle").onclick = () => {
-    const open = $("addForm").hidden;
-    $("addForm").hidden = !open;
-    $("addToggle").setAttribute("aria-expanded", String(open));
-    $("addBar").classList.toggle("open", open);
-    $("chev").textContent = open ? "\u25BE" : "\u25B8";
-    if (open) $("addBar").scrollTop = 0;
-  };
-
-  $("addForm").onsubmit = async (event) => {
-    event.preventDefault();
-    const custom = $("reward").value === OTHER;
-    const select = $("reward");
-    const title = custom ? $("custom").value.trim() : select.options[select.selectedIndex].textContent;
-    const note = $("addNote");
-    if (!title) {
-      note.className = "note bad";
-      note.textContent = "Укажите название награды.";
-      return;
-    }
-
-    $("addButton").disabled = true;
-    try {
-      const r = await fetch("/api/add?" + q, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          user: $("user").value,
-          input: $("input").value,
-          reward_id: custom ? "" : select.value,
-          queue_id: custom ? $("queue").value : ""
-        })
-      });
-      if (!r.ok) throw new Error(r.status);
-      $("user").value = "";
-      $("input").value = "";
-      note.className = "note ok";
-      note.textContent = "Добавлено.";
-      setTimeout(() => { if (note.textContent === "Добавлено.") note.textContent = ""; }, 3000);
-    } catch (e) {
-      note.className = "note bad";
-      note.textContent = "Не удалось добавить запись.";
-    } finally {
-      $("addButton").disabled = false;
-    }
-  };
-
   // ---- связь с плагином ----
   function connect() {
     const source = new EventSource("/events?" + q);
@@ -404,7 +477,6 @@
       try { message = JSON.parse(e.data); } catch (err) { return; }
       if (message.type !== "state") return;
       renderEntries(message);
-      renderRewards(message);
     };
   }
   connect();
