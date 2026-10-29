@@ -73,10 +73,18 @@ namespace RewardQueue.Tests
             {
                 Loc.LanguageOverride = russian;
                 var previousAuth = TwitchAuth.Current;
+                var previousRewards = Plugin.Rewards;
                 using var auth = new TwitchAuth(Path.Combine(_fx.Dir, "layout_auth.bin"));
                 try
                 {
                     Plugin.SetTheme(dark);
+                    // награды с короткими и очень длинными названиями; часть отмечена
+                    Plugin.UpdateRewards(r => r.WithKnown(new[]
+                    {
+                        new RewardInfo { id = "a", title = "Заказ техники" },
+                        new RewardInfo { id = "b", title = "Заказ музыки с очень длинным названием, которое не помещается в строку окна настроек" },
+                        new RewardInfo { id = "c", title = "x" }
+                    }).WithTracked("a", true));
                     auth.SetSnapshotForPreview(Snapshot(authState));
                     TwitchAuth.Current = auth;
 
@@ -91,7 +99,7 @@ namespace RewardQueue.Tests
                         Application.DoEvents();
 
                         var cards = Cards(form).ToList();
-                        Assert.Equal(3, cards.Count);
+                        Assert.Equal(4, cards.Count);
                         foreach (var card in cards)
                         {
                             string where = $"{w}x{h} ru={russian} dark={dark} auth={authState} «{card.Text}»";
@@ -115,6 +123,7 @@ namespace RewardQueue.Tests
                 }
                 finally
                 {
+                    Plugin.UpdateRewards(_ => previousRewards);
                     TwitchAuth.Current = previousAuth;
                     Loc.LanguageOverride = null;
                     Plugin.SetTheme(true);

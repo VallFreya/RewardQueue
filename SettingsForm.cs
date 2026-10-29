@@ -24,6 +24,15 @@ namespace RewardQueue
         private readonly List<Card> _cards = new List<Card>();
         private Label _serverLabel = null!;
         private Label _clientsLabel = null!;
+        private Label _ordersLabel = null!;
+        private Label _queueLabel = null!;
+        private Label _rewardsStatus = null!;
+        private Label _rewardsTracked = null!;
+        private ThemedButton _rewardsRefresh = null!;
+        // Загрузка списка наград идёт в фоне: результат и просьба перестроить окно читаются таймером окна
+        private volatile bool _fetching;
+        private volatile bool _rebuildRequested;
+        private volatile string _fetchMessage = "";
         private Label _authStatus = null!;
         private Label _authCode = null!;
         private ThemedButton _authOpen = null!;
@@ -50,7 +59,17 @@ namespace RewardQueue
 
             // состояние меняется редко, полсекунды хватает
             _liveTimer = new System.Windows.Forms.Timer { Interval = 500 };
-            _liveTimer.Tick += (s, e) => UpdateLive();
+            _liveTimer.Tick += (s, e) =>
+            {
+                // список наград обновился: строки с галочками строятся заново
+                if (_rebuildRequested)
+                {
+                    _rebuildRequested = false;
+                    RebuildUi();
+                    return;
+                }
+                UpdateLive();
+            };
 
             ObsTheme.Apply(Plugin.ThemeDark);
             BuildUi();
@@ -112,6 +131,13 @@ namespace RewardQueue
             AddAuthButtons(twitch, 12);
             AddText(twitch, Loc.TwitchPrivacy, 12, muted: true);
 
+            var rewards = AddCard(Loc.RewardsTitle);
+            AddText(rewards, Loc.RewardsIntro, 0, muted: true);
+            AddRewardsRefresh(rewards, 12);
+            foreach (var reward in Plugin.Rewards.Known) AddRewardRow(rewards, reward);
+            if (Plugin.Rewards.Known.Count == 0) AddText(rewards, Loc.RewardsEmpty, 12, muted: true);
+            _rewardsTracked = AddText(rewards, "", 12, muted: true);
+
             var addresses = AddCard(Loc.AddressesTitle);
             AddText(addresses, Loc.AddressesIntro, 0, muted: true);
             AddText(addresses, Loc.DockLabel, 16, bold: true);
@@ -125,6 +151,8 @@ namespace RewardQueue
             var status = AddCard(Loc.StatusTitle);
             _serverLabel = AddText(status, "", 0);
             _clientsLabel = AddText(status, "", 6);
+            _ordersLabel = AddText(status, "", 6);
+            _queueLabel = AddText(status, "", 6);
 
             // Fill добавляется первым: при docking контролы раскладываются от последнего добавленного к первому
             Controls.Add(content);
@@ -314,6 +342,110 @@ namespace RewardQueue
             });
         }
 
+        // ---- награды ----
+
+        // Кнопка «Обновить список» и результат: рядом, а если места мало, результат переносится под кнопку
+        private void AddRewardsRefresh(Card card, int gap)
+        {
+            _rewardsRefresh = new ThemedButton { Text = Loc.RewardsRefresh, Glyph = Ui.GlyphRefresh };
+            _rewardsRefresh.Click += (s, e) => _ = Task.Run(RefreshRewardsAsync);
+            card.Panel.Controls.Add(_rewardsRefresh);
+
+            _rewardsStatus = new Label
+            {
+                AutoSize = false,
+                UseMnemonic = false,
+                TextAlign = ContentAlignment.MiddleLeft,
+                BackColor = ObsTheme.BaseBg,
+                ForeColor = ObsTheme.TextMuted,
+                Font = Ui.Font()
+            };
+            card.Panel.Controls.Add(_rewardsStatus);
+
+            var button = _rewardsRefresh;
+            var label = _rewardsStatus;
+            card.Add((top, width) =>
+            {
+                top += Ui.Px(gap);
+                int buttonWidth = Ui.Px(200);
+                int height = Ui.Px(32);
+                button.SetBounds(Ui.Px(CardPad), top, Math.Min(buttonWidth, width), height);
+
+                int sideWidth = width - buttonWidth - Ui.Px(12);
+                if (sideWidth >= Ui.Px(200))
+                {
+                    label.SetBounds(Ui.Px(CardPad) + buttonWidth + Ui.Px(12), top, sideWidth, height);
+                    return top + height;
+                }
+
+                if (label.Text.Length == 0) return top + height;
+                int below = top + height + Ui.Px(8);
+                int labelHeight = MeasureHeight(label, width);
+                label.SetBounds(Ui.Px(CardPad), below, width, labelHeight);
+                return below + labelHeight;
+            });
+        }
+
+        // Строка награды с галочкой. Отметка записывается в конфиг сразу
+        private void AddRewardRow(Card card, RewardInfo reward)
+        {
+            string id = reward.id;
+            var box = new ThemedCheckBox
+            {
+                Text = reward.title.Length > 0 ? reward.title : id,
+                Checked = Plugin.Rewards.IsTracked(id),
+                BackColor = ObsTheme.BaseBg
+            };
+            box.CheckedChanged += (s, e) =>
+            {
+                Plugin.UpdateRewards(r => r.WithTracked(id, box.Checked));
+                UpdateLive();
+            };
+            card.Panel.Controls.Add(box);
+            card.Add((top, width) =>
+            {
+                top += Ui.Px(6);
+                int height = Ui.Px(24);
+                box.SetBounds(Ui.Px(CardPad), top, width, height);
+                return top + height;
+            });
+        }
+
+        // Получает список наград с канала и сохраняет его. Выполняется в фоне; окно подхватывает результат таймером
+        private async Task RefreshRewardsAsync()
+        {
+            if (_fetching) return;
+            _fetching = true;
+            _fetchMessage = Loc.RewardsRefreshing;
+            try
+            {
+                var api = TwitchApi.Current;
+                var result = api == null
+                    ? new RewardsResult(RewardsResultKind.NotSignedIn, Array.Empty<RewardInfo>())
+                    : await api.GetRewardsAsync().ConfigureAwait(false);
+
+                if (result.Kind == RewardsResultKind.Success)
+                {
+                    Plugin.UpdateRewards(r => r.WithKnown(result.Rewards));
+                    _fetchMessage = result.Rewards.Count == 0 ? Loc.RewardsNoneOnChannel : Loc.RewardsLoaded(result.Rewards.Count);
+                    _rebuildRequested = true;
+                }
+                else
+                {
+                    _fetchMessage = Loc.RewardsProblem(result.Kind, result.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.LogError($"Reward list refresh failed: {ex.Message}");
+                _fetchMessage = Loc.RewardsProblem(RewardsResultKind.Failed, ex.Message);
+            }
+            finally
+            {
+                _fetching = false;
+            }
+        }
+
         private static void ShowCopied(ThemedButton button)
         {
             string normal = button.Text;
@@ -484,6 +616,22 @@ namespace RewardQueue
                 ? Loc.ServerRunning(server.Port)
                 : Loc.ServerFailed(LocalServer.StartError == "port is busy" ? Loc.PortBusy : LocalServer.StartError ?? "-"));
             changed |= SetText(_clientsLabel, Loc.OpenPages(server?.ClientCount ?? 0));
+
+            var auth = TwitchAuth.Current;
+            var client = EventSubClient.Current;
+            string orders = auth == null || auth.Snapshot.State != AuthState.SignedIn || client == null ? Loc.OrdersNeedLogin
+                : client.State == EventSubState.Connected ? Loc.OrdersConnected
+                : client.State == EventSubState.Connecting ? Loc.OrdersConnecting
+                : Loc.OrdersRetry(client.Detail);
+            changed |= SetText(_ordersLabel, orders);
+            changed |= SetText(_queueLabel, Loc.QueueCount(QueueService.Current?.Count ?? 0));
+
+            var rewardSettings = Plugin.Rewards;
+            string tracked = rewardSettings.Known.Count == 0 ? "" : Loc.RewardsTracked(rewardSettings.TrackedKnownCount, rewardSettings.Known.Count);
+            changed |= SetText(_rewardsTracked, tracked);
+            SetShown(_rewardsTracked, tracked.Length > 0);
+            changed |= SetText(_rewardsStatus, _fetchMessage);
+            _rewardsRefresh.Enabled = !_fetching && auth?.Snapshot.State == AuthState.SignedIn;
 
             // новый текст мог занять другое число строк
             if (changed) LayoutContent();

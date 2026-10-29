@@ -78,6 +78,37 @@ namespace RewardQueue
             _ => Ru ? $"Не удалось выполнить вход{(detail.Length > 0 ? ": " + detail : "")}" : $"Sign in failed{(detail.Length > 0 ? ": " + detail : "")}"
         };
 
+        // Блок «Награды»
+        public static string RewardsTitle => Ru ? "Награды за баллы канала" : "Channel point rewards";
+        public static string RewardsIntro => Ru
+            ? "Отметьте награды, заказы которых нужно показывать в очереди. Остальные плагин не трогает. Список берётся с вашего канала на Twitch."
+            : "Tick the rewards whose redemptions should appear in the queue. The plugin ignores the others. The list comes from your Twitch channel.";
+        public static string RewardsRefresh => Ru ? "Обновить список" : "Refresh the list";
+        public static string RewardsRefreshing => Ru ? "Загружаю…" : "Loading…";
+        public static string RewardsLoaded(int count) => Ru ? $"Загружено наград: {count}" : $"Rewards loaded: {count}";
+        public static string RewardsNoneOnChannel => Ru ? "На канале нет наград за баллы." : "The channel has no channel point rewards.";
+        public static string RewardsEmpty => Ru
+            ? "Список пока пуст. Войдите в Twitch и нажмите «Обновить список»."
+            : "The list is empty. Sign in to Twitch and click Refresh the list.";
+        public static string RewardsTracked(int tracked, int total) => Ru ? $"Отслеживается наград: {tracked} из {total}" : $"Rewards tracked: {tracked} of {total}";
+        public static string RewardsProblem(RewardsResultKind kind, string detail) => kind switch
+        {
+            RewardsResultKind.NotSignedIn => Ru ? "Сначала войдите в Twitch." : "Sign in to Twitch first.",
+            RewardsResultKind.Unauthorized => Ru ? "Twitch не принял вход. Войдите заново." : "Twitch did not accept the login. Sign in again.",
+            RewardsResultKind.Forbidden => Ru ? "У канала нет статуса партнёра или аффилиата, поэтому наград за баллы там нет." : "The channel has no partner or affiliate status, so it has no channel point rewards.",
+            RewardsResultKind.Offline => Ru ? "Нет связи с Twitch." : "No connection to Twitch.",
+            _ => Ru ? $"Не удалось получить список{(detail.Length > 0 ? ": " + detail : "")}" : $"Could not get the list{(detail.Length > 0 ? ": " + detail : "")}"
+        };
+
+        // Строки состояния
+        public static string OrdersConnected => Ru ? "Заказы наград: подключено, заказы приходят в очередь" : "Reward redemptions: connected, redemptions go to the queue";
+        public static string OrdersConnecting => Ru ? "Заказы наград: подключаюсь…" : "Reward redemptions: connecting…";
+        public static string OrdersNeedLogin => Ru ? "Заказы наград: не подключено, нужен вход в Twitch" : "Reward redemptions: not connected, sign in to Twitch";
+        public static string OrdersRetry(string detail) => Ru
+            ? $"Заказы наград: нет соединения, повторная попытка{(detail.Length > 0 ? " (" + detail + ")" : "")}"
+            : $"Reward redemptions: no connection, retrying{(detail.Length > 0 ? " (" + detail + ")" : "")}";
+        public static string QueueCount(int count) => Ru ? $"Записей в очереди: {count}" : $"Entries in the queue: {count}";
+
         // Блок «Адреса для OBS»
         public static string AddressesTitle => Ru ? "Адреса для OBS" : "Addresses for OBS";
         public static string AddressesIntro => Ru

@@ -25,6 +25,16 @@ namespace UiPreview
             Loc.LanguageOverride = Environment.GetEnvironmentVariable("UITEST_LANG") != "en";
             Plugin.EnsureAccessKey();
             LocalServer.StartCurrent(47999, Plugin.AccessKey);
+            // награды для снимка: короткие и длинные названия, часть отмечена; UITEST_REWARDS=0 показывает пустой список
+            if (Environment.GetEnvironmentVariable("UITEST_REWARDS") != "0")
+            {
+                Plugin.UpdateRewards(r => r.WithKnown(new[]
+                {
+                    new RewardInfo { id = "a", title = "Заказ техники" },
+                    new RewardInfo { id = "b", title = "Заказ музыки" },
+                    new RewardInfo { id = "c", title = "Очень длинное название награды, которое придётся обрезать многоточием в конце строки" }
+                }).WithTracked("a", true));
+            }
             using var auth = new TwitchAuth(Path.Combine(tmp, "preview_auth.bin"));
             TwitchAuth.Current = auth;
 

@@ -43,7 +43,11 @@ namespace RewardQueue
         public static string ClientIdOverride { get; private set; } = "";
 
         // Проверка токена Twitch раз в час: refresh-токен обновляется при использовании, а отозванный вход надо заметить
-        private static System.Threading.Timer? _authTimer;
+        private static System.Threading.Timer? _hourlyTimer;
+
+        /// <summary>Какие награды отслеживаются (неизменяемый снимок, заменяется целиком)</summary>
+        internal static RewardSettings Rewards { get; private set; } = RewardSettings.Empty;
+        private static readonly object RewardsLock = new object();
 
         private static IntPtr _moduleName = IntPtr.Zero;
         private static int _settingsOpen;
@@ -161,16 +165,34 @@ namespace RewardQueue
             return true;
         }
 
-        // Читает сохранённый вход и проверяет его у Twitch в фоне, дальше проверка идёт раз в час
+        // Очередь, вход, API и клиент EventSub. Вход читается и проверяется в фоне; когда он подтверждён, клиент подключается к EventSub
+        // и заказы выбранных наград попадают в очередь. Дальше раз в час проверяются вход и срок хранения записей
         private static void StartTwitchLogin()
         {
+            QueueService.Current = new QueueService(Path.Combine(GetConfigDirectory(), QueueStore.FileName), () => DateTimeOffset.UtcNow, RetentionDays);
+            LogInfo($"Queue restored: {QueueService.Current.Count} entries");
+
             var auth = new TwitchAuth(Path.Combine(GetConfigDirectory(), TokenVault.FileName), ClientIdOverride);
             TwitchAuth.Current = auth;
+            var api = new TwitchApi(auth);
+            TwitchApi.Current = api;
+
+            var client = new EventSubClient(
+                connect: WebSocketEventSubSocket.ConnectAsync,
+                subscribe: api.SubscribeRedemptionsAsync,
+                onRedemption: OnRedemption,
+                onUnauthorized: auth.RevalidateAsync);
+            EventSubClient.Current = client;
+
+            // Клиент работает, пока есть вход: вышли или вход истёк, и он останавливается
+            auth.Changed += () => SyncEventSub(auth, client);
+
             _ = Task.Run(async () =>
             {
                 try
                 {
                     await auth.InitializeAsync().ConfigureAwait(false);
+                    SyncEventSub(auth, client);
                 }
                 catch (Exception ex)
                 {
@@ -178,22 +200,61 @@ namespace RewardQueue
                 }
             });
 
-            _authTimer = new System.Threading.Timer(OnAuthTimer, null, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+            _hourlyTimer = new System.Threading.Timer(OnHourlyTimer, null, TimeSpan.FromHours(1), TimeSpan.FromHours(1));
+        }
+
+        private static void SyncEventSub(TwitchAuth auth, EventSubClient client)
+        {
+            try
+            {
+                if (auth.Snapshot.State == AuthState.SignedIn) client.Start();
+                else _ = client.StopAsync();
+            }
+            catch (Exception ex)
+            {
+                LogError($"EventSub start/stop failed: {ex.Message}");
+            }
+        }
+
+        // Заказ награды из EventSub (поток клиента): в очередь попадают только отмеченные награды
+        private static void OnRedemption(RedemptionEvent redemption)
+        {
+            string? queueId = Rewards.QueueFor(redemption.RewardId);
+            if (queueId == null) return;
+
+            var queue = QueueService.Current;
+            if (queue == null) return;
+
+            bool added = queue.Add(new QueueEntry
+            {
+                id = redemption.Id,
+                source = QueueEntry.SourceTwitch,
+                queue_id = queueId,
+                reward_id = redemption.RewardId,
+                reward_title = redemption.RewardTitle,
+                user_name = redemption.UserName.Length > 0 ? redemption.UserName : redemption.UserLogin,
+                user_input = redemption.UserInput,
+                redeemed_at = redemption.RedeemedAt
+            });
+
+            // ники и тексты зрителей в журнал не пишем
+            LogInfo(added ? "Reward redemption added to the queue" : "Reward redemption ignored (already known or empty)");
         }
 
         // Поток пула: исключение отсюда завершило бы процесс OBS
-        private static void OnAuthTimer(object? state)
+        private static void OnHourlyTimer(object? state)
         {
             _ = Task.Run(async () =>
             {
                 try
                 {
+                    QueueService.Current?.PurgeExpired();
                     var auth = TwitchAuth.Current;
                     if (auth != null) await auth.RevalidateAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    LogError($"Twitch login check failed: {ex.Message}");
+                    LogError($"Hourly check failed: {ex.Message}");
                 }
             });
         }
@@ -205,10 +266,21 @@ namespace RewardQueue
             try
             {
                 CloseSettingsWindow();
-                _authTimer?.Dispose();
-                _authTimer = null;
+                _hourlyTimer?.Dispose();
+                _hourlyTimer = null;
+                // клиент EventSub останавливается первым: пока он работает, он держит поток в нашей DLL
+                var client = EventSubClient.Current;
+                EventSubClient.Current = null;
+                if (client != null)
+                {
+                    client.StopAsync().GetAwaiter().GetResult();
+                    client.Dispose();
+                }
+                TwitchApi.Current?.Dispose();
+                TwitchApi.Current = null;
                 TwitchAuth.Current?.Dispose();
                 TwitchAuth.Current = null;
+                QueueService.Current = null;
                 LocalServer.StopCurrent();
             }
             catch (Exception ex)
@@ -305,6 +377,7 @@ namespace RewardQueue
                 AccessKey = ServerGuard.IsValidKey(config.access_key) ? config.access_key : "";
                 RetentionDays = QueueState.ClampRetentionDays(config.retention_days);
                 ClientIdOverride = TwitchAuth.ValidClientId(config.client_id) ? config.client_id : "";
+                Rewards = RewardSettings.FromConfig(config.known_rewards, config.queues);
                 LogInfo($"Loaded config from '{configPath}'");
             }
             catch (Exception ex)
@@ -360,7 +433,8 @@ namespace RewardQueue
             try
             {
                 configPath = GetConfigFilePath();
-                var config = new PluginConfig { theme = ThemeDark ? "dark" : "light", port = Port, access_key = AccessKey, retention_days = RetentionDays, client_id = ClientIdOverride };
+                var config = new PluginConfig { theme = ThemeDark ? "dark" : "light", port = Port, access_key = AccessKey, retention_days = RetentionDays, client_id = ClientIdOverride,
+                    known_rewards = Rewards.Known.ToList(), queues = Rewards.Queues.ToList() };
 
                 string json = JsonSerializer.Serialize(config, JsonContext.PluginConfig);
                 AtomicFile.WriteAllText(configPath, json, Encoding.UTF8);
@@ -376,6 +450,16 @@ namespace RewardQueue
         }
 
         /// <summary>Запоминает тему окна</summary>
+        /// <summary>Меняет настройки наград (список или отметки) и записывает конфиг. Вызывается из окна и после обновления списка</summary>
+        internal static void UpdateRewards(Func<RewardSettings, RewardSettings> change)
+        {
+            lock (RewardsLock)
+            {
+                Rewards = change(Rewards);
+                WriteConfig();
+            }
+        }
+
         public static void SetTheme(bool dark)
         {
             ThemeDark = dark;

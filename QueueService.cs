@@ -12,6 +12,9 @@ namespace RewardQueue
         private readonly Func<DateTimeOffset> _clock;
         private readonly TimeSpan _retention;
 
+        /// <summary>Действующая очередь (создаётся при загрузке плагина)</summary>
+        public static QueueService? Current { get; set; }
+
         /// <summary>Очередь изменилась. Вызывается вне блокировок, из потока, который внёс изменение</summary>
         public event Action? Changed;
 
