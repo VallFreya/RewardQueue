@@ -3,31 +3,76 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Очередь наград: проверка дока</title>
+<title>Очередь наград</title>
 <style>
-  body { margin: 0; padding: 16px; font: 15px/1.5 "Segoe UI", sans-serif; background: #1f1e25; color: #e6e5ea; }
-  h1 { font-size: 16px; margin: 0 0 12px; }
-  .row { margin: 8px 0; }
-  .muted { color: #9a98a6; }
-  .ok { color: #7bd88f; }
-  .bad { color: #ff7b7b; }
-  button { font: inherit; padding: 6px 14px; border: 1px solid #4b4a57; border-radius: 4px; background: #2c2b35; color: inherit; cursor: pointer; }
-  button:hover { background: #383743; }
-  .counter { font-size: 28px; font-weight: 600; }
+  /* Цвета те же, что в окне настроек плагина */
+  :root {
+    --window: #1d1f26; --base: #272a33; --border: #343846;
+    --text: #ffffff; --muted: #a8a8a8;
+    --button: #3c404d; --button-hover: #464b59; --button-border: #5b6273;
+    --ok: #7bd88f; --bad: #ff7b7b;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --window: #cdcdcd; --base: #e8e8e8; --border: #aeaeae;
+    --text: #0a0a0a; --muted: #575757;
+    --button: #f5f5f5; --button-hover: #fefefe; --button-border: #828282;
+    --ok: #1c7a35; --bad: #b3261e;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 12px; font: 14px/1.45 "Segoe UI", sans-serif; background: var(--window); color: var(--text); }
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; }
+  h1 { font-size: 15px; margin: 0; }
+  label { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  select, button { font: inherit; color: var(--text); background: var(--button); border: 1px solid var(--button); border-radius: 4px; padding: 5px 10px; }
+  select { padding-right: 4px; }
+  button { cursor: pointer; }
+  button:hover, select:hover { background: var(--button-hover); border-color: var(--button-border); }
+  .card { background: var(--base); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; }
+  .row { margin: 6px 0; }
+  .muted { color: var(--muted); }
+  .ok { color: var(--ok); }
+  .bad { color: var(--bad); }
+  .counter { font-size: 24px; font-weight: 600; }
 </style>
+<script>
+  // Тема применяется до отрисовки, чтобы страница не мигала. Хранится в браузере дока; по умолчанию тёмная
+  (function () {
+    var theme = "dark";
+    try { theme = localStorage.getItem("rq-panel-theme") === "light" ? "light" : "dark"; } catch (e) { }
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
 </head>
 <body>
-<h1>Проверка дока</h1>
-<div class="row">Связь с плагином: <span id="state" class="bad">нет</span></div>
-<div class="row">Время на сервере: <span id="time" class="muted">—</span></div>
-<div class="row">Счётчик: <span id="counter" class="counter">—</span></div>
-<div class="row"><button id="bump">+1 (команда плагину)</button></div>
-<div class="row muted">Если счётчик меняется и на странице источника для трансляции, всё работает.</div>
+<header>
+  <h1>Очередь наград</h1>
+  <label>Тема
+    <select id="theme">
+      <option value="dark">Тёмная</option>
+      <option value="light">Светлая</option>
+    </select>
+  </label>
+</header>
+<div class="card">
+  <div class="row">Связь с плагином: <span id="state" class="bad">нет</span></div>
+  <div class="row">Время на сервере: <span id="time" class="muted">—</span></div>
+  <div class="row">Счётчик: <span id="counter" class="counter">—</span></div>
+  <div class="row"><button id="bump">+1 (команда плагину)</button></div>
+</div>
 <script>
   const key = new URLSearchParams(location.search).get("key") || "";
   const stateEl = document.getElementById("state");
   const timeEl = document.getElementById("time");
   const counterEl = document.getElementById("counter");
+  const themeEl = document.getElementById("theme");
+
+  themeEl.value = document.documentElement.getAttribute("data-theme");
+  themeEl.onchange = () => {
+    document.documentElement.setAttribute("data-theme", themeEl.value);
+    try { localStorage.setItem("rq-panel-theme", themeEl.value); } catch (e) { }
+  };
 
   const source = new EventSource("/events?key=" + encodeURIComponent(key));
   source.onopen = () => { stateEl.textContent = "есть"; stateEl.className = "ok"; };
